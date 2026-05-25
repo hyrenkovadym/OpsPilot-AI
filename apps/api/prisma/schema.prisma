@@ -1,0 +1,104 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  SUPPORT_AGENT
+  ADMIN
+}
+
+enum TicketCategory {
+  HR
+  IT
+  FINANCE
+  OPERATIONS
+  CUSTOMER_SUPPORT
+  OTHER
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  NEEDS_HUMAN_REVIEW
+  RESOLVED
+  REJECTED
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+model User {
+  id              String         @id @default(uuid())
+  email           String         @unique
+  passwordHash    String
+  fullName        String
+  role            Role           @default(USER)
+  refreshTokens   RefreshToken[]
+  createdTickets  Ticket[]       @relation("TicketCreatedBy")
+  assignedTickets Ticket[]       @relation("TicketAssignedTo")
+  auditLogs       AuditLog[]     @relation("AuditActor")
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@index([role])
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String
+  expiresAt DateTime
+  createdAt DateTime  @default(now())
+  revokedAt DateTime?
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Ticket {
+  id           String         @id @default(uuid())
+  title        String
+  description  String
+  category     TicketCategory
+  status       TicketStatus   @default(OPEN)
+  priority     TicketPriority @default(MEDIUM)
+  createdById  String
+  createdBy    User           @relation("TicketCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+  assignedToId String?
+  assignedTo   User?          @relation("TicketAssignedTo", fields: [assignedToId], references: [id], onDelete: SetNull)
+  aiSummary    String?
+  aiConfidence Float?
+  aiRecommendedAction String?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  @@index([createdById])
+  @@index([assignedToId])
+  @@index([status])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  actorId    String?
+  actor      User?    @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  action     String
+  entityType String
+  entityId   String
+  metadata   Json
+  createdAt  DateTime @default(now())
+
+  @@index([actorId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
+
