@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
@@ -33,7 +33,7 @@ export default function DashboardPage() {
       setRealtimeHint(null);
     } catch (fetchError) {
       if (fetchError instanceof ApiError) {
-        setError(fetchError.message);
+        setError(formatApiError(fetchError));
       } else {
         setError('Could not load dashboard data.');
       }
@@ -143,4 +143,11 @@ export default function DashboardPage() {
       ) : null}
     </PageSection>
   );
+}
+
+function formatApiError(error: ApiError): string {
+  if (error.requestId && !error.message.includes('requestId:')) {
+    return `${error.message} (requestId: ${error.requestId})`;
+  }
+  return error.message;
 }

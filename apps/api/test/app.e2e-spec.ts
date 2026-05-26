@@ -20,10 +20,14 @@ import { randomUUID } from 'crypto';
 import request from 'supertest';
 import { AiService } from '../src/ai/ai.service';
 import { AppModule } from '../src/app.module';
+import { RATE_LIMIT_METADATA_KEY } from '../src/common/security/rate-limit.decorator';
+import { AuthController } from '../src/auth/auth.controller';
 import { JobsService } from '../src/jobs/jobs.service';
 import { KnowledgeBaseService } from '../src/knowledge-base/knowledge-base.service';
+import { KnowledgeBaseController } from '../src/knowledge-base/knowledge-base.controller';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { RealtimeService } from '../src/realtime/realtime.service';
+import { TicketsController } from '../src/tickets/tickets.controller';
 import { TicketsService } from '../src/tickets/tickets.service';
 
 interface AuthPayload {
@@ -799,6 +803,150 @@ describe('OpsPilot API Phase 3 (e2e)', () => {
 
   afterAll(async () => {
     await app.close();
+  });
+
+  it('returns X-Request-ID and preserves custom request id', async () => {
+    const generated = await request(app.getHttpServer())
+      .get('/api/health')
+      .expect(200);
+    expect(generated.headers['x-request-id']).toBeTruthy();
+
+    const customRequestId = `req-${randomUUID()}`;
+    const custom = await request(app.getHttpServer())
+      .get('/api/health')
+      .set('X-Request-ID', customRequestId)
+      .expect(200);
+    expect(custom.headers['x-request-id']).toBe(customRequestId);
+  });
+
+  it('error response includes requestId', async () => {
+    const response = await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send({
+        email: 'invalid-email',
+        password: '123',
+      })
+      .expect(400);
+
+    expect(typeof response.body.requestId).toBe('string');
+    expect(response.body.path).toBe('/api/auth/register');
+  });
+
+  it('ready endpoint returns safe status summary', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/api/ready')
+      .expect(200);
+
+    expect(response.body.status).toBe('ready');
+    expect(response.body.database).toBe('up');
+    expect(typeof response.body.redis).toBe('string');
+    expect(response.body.queueMode).toBe('sync');
+    expect(response.body.realtimeEnabled).toBe(false);
+    expect(response.body.aiProvider).toBe('mock');
+  });
+
+  it('system info endpoint does not expose secrets', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/api/system/info')
+      .expect(200);
+
+    expect(response.body.service).toBe('opspilot-api');
+    expect(response.body.nodeVersion).toBeTruthy();
+    expect(response.body.queueMode).toBe('sync');
+    expect(response.body.realtimeEnabled).toBe(false);
+    expect(response.body.jwtAccessSecret).toBeUndefined();
+    expect(response.body.jwtRefreshSecret).toBeUndefined();
+    expect(response.body.openaiApiKey).toBeUndefined();
+    expect(response.body.databaseUrl).toBeUndefined();
+  });
+
+  it('audit metadata includes requestId for auth events', async () => {
+    const requestId = `register-${randomUUID()}`;
+    const response = await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .set('X-Request-ID', requestId)
+      .send({
+        email: 'request.id.audit@company.com',
+        password: 'StrongPass123!',
+        fullName: 'Request Id Audit',
+      })
+      .expect(201);
+
+    const createdUserId = (response.body as AuthPayload).user.id;
+    const auditLog = mockPrisma.auditLogs.find(
+      (item) =>
+        item.action === 'user_registered' && item.entityId === createdUserId,
+    );
+
+    expect(auditLog).toBeTruthy();
+    const metadata = (auditLog?.metadata ?? {}) as Record<string, unknown>;
+    expect(metadata.requestId).toBe(requestId);
+  });
+
+  it('ticket realtime payload remains safe (no token or secret fields)', async () => {
+    const publishSpy = jest
+      .spyOn(realtimeService, 'publish')
+      .mockResolvedValue(undefined);
+    const user = await register('safe.realtime@company.com', 'Safe Realtime');
+    await createTicket(user.accessToken, {
+      title: 'safe payload',
+      description: 'Validate realtime payload safety.',
+      category: 'OTHER',
+      priority: 'LOW',
+    });
+
+    const call = publishSpy.mock.calls.find(
+      (entry) => entry[0] === 'ticket.created',
+    );
+    expect(call).toBeTruthy();
+
+    const payload = (call?.[1] ?? {}) as Record<string, unknown>;
+    expect(payload).not.toHaveProperty('accessToken');
+    expect(payload).not.toHaveProperty('jwt');
+    expect(payload).not.toHaveProperty('passwordHash');
+    expect(payload).not.toHaveProperty('openaiApiKey');
+    publishSpy.mockRestore();
+  });
+
+  it('rate limits are configured on auth, ticket AI, and KB search endpoints', () => {
+    const authRegisterDescriptor = Object.getOwnPropertyDescriptor(
+      AuthController.prototype,
+      'register',
+    );
+    const authLoginDescriptor = Object.getOwnPropertyDescriptor(
+      AuthController.prototype,
+      'login',
+    );
+    const ticketAnalyzeDescriptor = Object.getOwnPropertyDescriptor(
+      TicketsController.prototype,
+      'analyzeTicket',
+    );
+    const knowledgeSearchDescriptor = Object.getOwnPropertyDescriptor(
+      KnowledgeBaseController.prototype,
+      'searchKnowledge',
+    );
+
+    const registerRateLimit = Reflect.getMetadata(
+      RATE_LIMIT_METADATA_KEY,
+      authRegisterDescriptor?.value as Function,
+    ) as { points: number; durationSeconds: number };
+    const loginRateLimit = Reflect.getMetadata(
+      RATE_LIMIT_METADATA_KEY,
+      authLoginDescriptor?.value as Function,
+    ) as { points: number; durationSeconds: number };
+    const analyzeRateLimit = Reflect.getMetadata(
+      RATE_LIMIT_METADATA_KEY,
+      ticketAnalyzeDescriptor?.value as Function,
+    ) as { points: number; durationSeconds: number };
+    const searchRateLimit = Reflect.getMetadata(
+      RATE_LIMIT_METADATA_KEY,
+      knowledgeSearchDescriptor?.value as Function,
+    ) as { points: number; durationSeconds: number };
+
+    expect(registerRateLimit).toEqual({ points: 120, durationSeconds: 60 });
+    expect(loginRateLimit).toEqual({ points: 120, durationSeconds: 60 });
+    expect(analyzeRateLimit).toEqual({ points: 60, durationSeconds: 60 });
+    expect(searchRateLimit).toEqual({ points: 120, durationSeconds: 60 });
   });
 
   it('user creates ticket', async () => {

@@ -2,10 +2,10 @@
 
 AI-powered internal support and operations automation platform.
 
-OpsPilot AI is a production-style TypeScript portfolio project focused on backend architecture, practical full-stack implementation, and safe AI automation patterns.
+OpsPilot AI is a production-style TypeScript portfolio project focused on backend architecture, full-stack delivery, safe AI automation, and production-readiness hardening.
 
 ## Problem Statement
-Internal support operations are often fragmented across chat, email, and spreadsheets. OpsPilot AI centralizes request intake, role-based workflow, auditable changes, and AI-assisted ticket analysis.
+Internal support operations are often fragmented across chat, email, and spreadsheets. OpsPilot AI centralizes request intake, role-based workflow, auditable lifecycle updates, AI-assisted ticket handling, and operational observability.
 
 ## Target Users
 - `USER`: creates and tracks own support tickets
@@ -13,44 +13,34 @@ Internal support operations are often fragmented across chat, email, and spreads
 - `ADMIN`: full operational access, governance, and knowledge base control
 
 ## Tech Stack
-- Backend: NestJS, TypeScript, Prisma, PostgreSQL, JWT, RBAC, Swagger, Jest
+- Backend: NestJS, TypeScript, Prisma, PostgreSQL, Redis, JWT, RBAC, Swagger, Jest
 - Frontend: Next.js App Router, React, TypeScript
-- Infra: Docker Compose, Redis readiness
+- Infra: Docker Compose, BullMQ worker, Socket.IO realtime, Redis pub/sub bridge
 - Testing: API e2e (Jest + Supertest), browser E2E (Playwright)
 
-## Current Scope (Phase 6)
+## Current Scope (Phase 7)
 - Ticket lifecycle workflow (create, assign, status, priority, update)
-- Audit logging for auth, ticket lifecycle, AI, and knowledge base events
+- Knowledge Base CRUD + deterministic chunking and retrieval
 - AI provider abstraction:
   - default deterministic `mock` provider
   - optional OpenAI-compatible provider
-- Knowledge Base module:
-  - CRUD + publish/archive/rechunk lifecycle
-  - deterministic chunking
-  - deterministic retrieval/search
-- Simple RAG-like AI flow:
-  - ticket AI analysis retrieves relevant published KB chunks
-  - context sources are returned and stored on ticket
-- Background jobs with BullMQ:
-  - async ticket AI analysis queue + worker processing
-  - async knowledge base rechunk queue + worker processing
-  - persisted background job status tracking
-  - sync fallback mode for deterministic tests/local fallback
-- Realtime updates with Socket.IO:
-  - authenticated websocket connections with JWT access token
-  - role-aware rooms (`support:all`, `user:{id}`, `ticket:{id}`, `job:{id}`)
-  - ticket lifecycle events (`ticket.created`, `ticket.updated`, ...)
-  - job lifecycle events (`job.queued`, `job.processing`, `job.completed`, `job.failed`)
-  - pub/sub bridge for worker-to-API realtime delivery via Redis
-- Frontend wiring:
-  - auth, tickets, ticket detail AI actions
-  - knowledge base list/new/detail pages
-  - realtime hints + live updates with polling fallback preserved
+- RAG-style ticket AI analysis with KB context sources
+- BullMQ async jobs + worker process + persisted `BackgroundJob` status
+- Socket.IO realtime updates with JWT auth and room-based permissions
+- Polling fallback preserved for job/ticket UI reliability
+- Observability and security hardening:
+  - request ID middleware (`X-Request-ID`)
+  - structured JSON logs for API and worker lifecycle
+  - global safe error response format with `requestId`
+  - improved readiness/system health endpoints
+  - endpoint-level rate limiting on sensitive routes
+  - security headers and stricter CORS origin validation
+  - audit metadata enrichment with `requestId`
 
 Not included yet:
 - LangChain
-- full RAG/vector DB stack
-- WebSocket-based presence/collaboration features
+- vector database/pgvector
+- WebSocket presence/collaborative editing
 
 ## API URLs
 - API base: `http://localhost:4000/api`
@@ -81,7 +71,7 @@ Core:
 - `REDIS_URL`
 - `JWT_ACCESS_SECRET`
 - `JWT_REFRESH_SECRET`
-- `CORS_ORIGIN`
+- `CORS_ORIGIN` (supports comma-separated origins)
 - `NEXT_PUBLIC_API_BASE_URL`
 
 AI:
@@ -100,7 +90,7 @@ Jobs:
 
 Realtime:
 - `REALTIME_ENABLED` (`true` default)
-- `SOCKET_CORS_ORIGIN`
+- `SOCKET_CORS_ORIGIN` (supports comma-separated origins)
 
 ## Local Setup
 ```bash
@@ -125,7 +115,7 @@ Run web:
 npm run dev -w @opspilot/web
 ```
 
-Run both:
+Run both API + web:
 ```bash
 npm run dev
 ```
@@ -150,45 +140,32 @@ npm run build -w @opspilot/web
 docker compose -f infra/docker-compose.yml config
 ```
 
-## Browser E2E
-Start required stack:
-```bash
-docker compose -f infra/docker-compose.yml up -d --build postgres redis api worker web
-```
-
-Run migrations/seed if needed:
-```bash
-docker compose -f infra/docker-compose.yml exec api npm run prisma:migrate
-docker compose -f infra/docker-compose.yml exec api npm run prisma:seed
-```
-
-Run E2E:
+Optional browser E2E:
 ```bash
 npm run test:e2e -w @opspilot/web
 ```
 
-## Async Job Flow
-In `QUEUE_MODE=async`:
-- `POST /tickets/:id/ai/analyze` enqueues a job and returns `jobId`
-- `POST /knowledge-base/articles/:id/rechunk` enqueues a job and returns `jobId`
-- use `GET /jobs/:id` (or `GET /jobs/tickets/:ticketId`) for status polling
-
-In `QUEUE_MODE=sync`:
-- analysis/rechunk are performed immediately in the API process
-
-## Realtime Flow
-- Socket server runs on the same API host/port (`http://localhost:4000`)
-- Client connects with `auth.token = <JWT access token>`
-- Worker publishes realtime events through Redis pub/sub
-- API subscribes and emits events to Socket.IO rooms
-- Frontend keeps polling as fallback for reliability
+## API Error Format (Phase 7)
+Errors are normalized to:
+```json
+{
+  "statusCode": 400,
+  "message": "Validation failed",
+  "path": "/api/auth/register",
+  "timestamp": "2026-05-26T12:00:00.000Z",
+  "requestId": "uuid-or-client-value"
+}
+```
 
 ## Architecture Docs
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-- [docs/RAG.md](docs/RAG.md)
+- [docs/API.md](docs/API.md)
 - [docs/JOBS.md](docs/JOBS.md)
 - [docs/REALTIME.md](docs/REALTIME.md)
+- [docs/RAG.md](docs/RAG.md)
+- [docs/SECURITY.md](docs/SECURITY.md)
+- [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md)
 - [docs/ROADMAP.md](docs/ROADMAP.md)
 
 ## Portfolio Summary
-Phase 6 adds authenticated Socket.IO realtime delivery on top of Phase 5 queues, including worker-safe Redis pub/sub bridging and frontend live updates with polling fallback.
+Phase 7 makes the platform production-readiness oriented: request correlation, safer error handling, validated CORS/security headers, route throttling, stronger readiness insight, and better job/realtime observability while preserving existing architecture and polling fallback.

@@ -20,4 +20,11 @@ export class HealthController {
   ready() {
     return this.healthService.getReadiness();
   }
+
+  @Get('system/info')
+  @ApiOperation({ summary: 'Safe runtime system metadata' })
+  @ApiOkResponse({ description: 'Safe system/runtime metadata' })
+  systemInfo() {
+    return this.healthService.getSystemInfo();
+  }
 }

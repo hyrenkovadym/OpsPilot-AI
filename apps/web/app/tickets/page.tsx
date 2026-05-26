@@ -61,7 +61,7 @@ export default function TicketsPage() {
       setRealtimeHint(null);
     } catch (fetchError) {
       if (fetchError instanceof ApiError) {
-        setError(fetchError.message);
+        setError(formatApiError(fetchError));
       } else {
         setError('Could not fetch tickets.');
       }
@@ -248,4 +248,11 @@ export default function TicketsPage() {
       ) : null}
     </PageSection>
   );
+}
+
+function formatApiError(error: ApiError): string {
+  if (error.requestId && !error.message.includes('requestId:')) {
+    return `${error.message} (requestId: ${error.requestId})`;
+  }
+  return error.message;
 }

@@ -27,6 +27,8 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
+import { RateLimit } from '../common/security/rate-limit.decorator';
+import { RateLimitGuard } from '../common/security/rate-limit.guard';
 import type { AuthenticatedUser } from '../common/types/jwt-payload.type';
 import { QueuedJobResponseDto } from '../jobs/dto/queued-job-response.dto';
 import { ArticleResponseDto } from './dto/article-response.dto';
@@ -148,6 +150,8 @@ export class KnowledgeBaseController {
   }
 
   @Get('search')
+  @UseGuards(RateLimitGuard)
+  @RateLimit({ points: 120, durationSeconds: 60 })
   @Roles(Role.USER, Role.SUPPORT_AGENT, Role.ADMIN)
   @ApiOperation({ summary: 'Search knowledge base chunks' })
   @ApiOkResponse({ type: SearchResultDto, isArray: true })

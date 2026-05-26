@@ -26,7 +26,10 @@ interface RoomRequestBody {
 @Injectable()
 @WebSocketGateway({
   cors: {
-    origin: process.env.SOCKET_CORS_ORIGIN ?? 'http://localhost:3000',
+    origin: (process.env.SOCKET_CORS_ORIGIN ?? 'http://localhost:3000')
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean),
     credentials: true,
   },
 })

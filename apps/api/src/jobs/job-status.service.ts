@@ -113,6 +113,11 @@ export class JobStatusService {
   }
 
   private toResponse(job: Prisma.BackgroundJobGetPayload<object>) {
+    const durationMs =
+      job.startedAt && job.finishedAt
+        ? job.finishedAt.getTime() - job.startedAt.getTime()
+        : null;
+
     return {
       id: job.id,
       type: job.type,
@@ -125,6 +130,7 @@ export class JobStatusService {
       createdAt: job.createdAt,
       startedAt: job.startedAt,
       finishedAt: job.finishedAt,
+      durationMs,
     };
   }
 }

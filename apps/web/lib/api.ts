@@ -185,12 +185,19 @@ export interface KnowledgeSearchQuery {
 export class ApiError extends Error {
   status: number;
   details: unknown;
+  requestId: string | null;
 
-  constructor(message: string, status: number, details: unknown) {
+  constructor(
+    message: string,
+    status: number,
+    details: unknown,
+    requestId: string | null = null,
+  ) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.details = details;
+    this.requestId = requestId;
   }
 }
 
@@ -235,11 +242,24 @@ async function requestJson<T>(
   const payload = await response.json().catch(() => null);
 
   if (!response.ok) {
+    const requestIdFromBody =
+      payload && typeof payload === 'object' && !Array.isArray(payload)
+        ? ((payload as Record<string, unknown>).requestId ?? null)
+        : null;
+    const requestIdHeader = response.headers.get('x-request-id');
+    const requestId =
+      typeof requestIdFromBody === 'string'
+        ? requestIdFromBody
+        : requestIdHeader;
+
     const message =
       (payload as { message?: string | string[] } | null)?.message ??
       `Request failed with status ${response.status}`;
     const normalizedMessage = Array.isArray(message) ? message.join(', ') : message;
-    throw new ApiError(normalizedMessage, response.status, payload);
+    const userMessage = requestId
+      ? `${normalizedMessage} (requestId: ${requestId})`
+      : normalizedMessage;
+    throw new ApiError(userMessage, response.status, payload, requestId);
   }
 
   return payload as T;

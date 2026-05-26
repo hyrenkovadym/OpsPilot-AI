@@ -1,6 +1,7 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Injectable, Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
+import { logStructured } from '../common/logging/structured-log.util';
 import { TicketsService } from '../tickets/tickets.service';
 import { JOB_NAMES } from '../jobs/job-names';
 import type { AnalyzeTicketJobPayload } from '../jobs/job-payloads';
@@ -36,6 +37,11 @@ export class TicketAiProcessor extends WorkerHost {
     this.logger.log(
       `Processing ticket AI job=${payload.backgroundJobId} ticketId=${payload.ticketId}`,
     );
+    logStructured('info', 'worker.ticket_ai.started', {
+      jobId: payload.backgroundJobId,
+      ticketId: payload.ticketId,
+      attempts,
+    });
 
     try {
       await this.ticketsService.analyzeTicketForJob({
@@ -55,12 +61,23 @@ export class TicketAiProcessor extends WorkerHost {
           jobName: JOB_NAMES.analyzeTicket,
         },
       });
+      logStructured('info', 'worker.ticket_ai.completed', {
+        jobId: payload.backgroundJobId,
+        ticketId: payload.ticketId,
+        attempts,
+        durationMs: Date.now() - startedAt,
+      });
     } catch (error) {
       await this.jobsService.markFailed({
         jobId: payload.backgroundJobId,
         attempts,
         reason:
           error instanceof Error ? error.message : 'Ticket AI worker failed',
+      });
+      logStructured('error', 'worker.ticket_ai.failed', {
+        jobId: payload.backgroundJobId,
+        ticketId: payload.ticketId,
+        attempts,
       });
       throw error;
     }

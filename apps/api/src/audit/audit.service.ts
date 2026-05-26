@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { getRequestId } from '../common/context/request-context';
 import { PrismaService } from '../prisma/prisma.service';
 import { REALTIME_EVENTS, REALTIME_ROOMS } from '../realtime/realtime-events';
 import { RealtimeService } from '../realtime/realtime.service';
@@ -20,13 +21,14 @@ export class AuditService {
   ) {}
 
   async log(input: CreateAuditLogInput): Promise<void> {
+    const requestId = getRequestId() ?? null;
     const log = await this.prisma.auditLog.create({
       data: {
         actorId: input.actorId ?? null,
         action: input.action,
         entityType: input.entityType,
         entityId: input.entityId,
-        metadata: input.metadata ?? {},
+        metadata: this.withRequestId(input.metadata, requestId),
       },
     });
 
@@ -38,10 +40,29 @@ export class AuditService {
         action: log.action,
         entityType: log.entityType,
         entityId: log.entityId,
+        requestId,
       },
       {
         rooms: [REALTIME_ROOMS.supportAll],
       },
     );
+  }
+
+  private withRequestId(
+    metadata: Prisma.InputJsonValue | undefined,
+    requestId: string | null,
+  ): Prisma.InputJsonValue {
+    const base = metadata ?? {};
+    if (typeof base !== 'object' || base === null || Array.isArray(base)) {
+      return {
+        value: base as Prisma.InputJsonValue,
+        requestId,
+      };
+    }
+
+    return {
+      ...(base as Prisma.InputJsonObject),
+      requestId,
+    };
   }
 }

@@ -1,6 +1,7 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Injectable, Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
+import { logStructured } from '../common/logging/structured-log.util';
 import { JOB_NAMES } from '../jobs/job-names';
 import type { RechunkArticleJobPayload } from '../jobs/job-payloads';
 import { JobsService } from '../jobs/jobs.service';
@@ -36,6 +37,11 @@ export class KnowledgeBaseProcessor extends WorkerHost {
     this.logger.log(
       `Processing knowledge rechunk job=${payload.backgroundJobId} articleId=${payload.articleId}`,
     );
+    logStructured('info', 'worker.knowledge_rechunk.started', {
+      jobId: payload.backgroundJobId,
+      articleId: payload.articleId,
+      attempts,
+    });
 
     try {
       await this.knowledgeBaseService.rechunkArticleForJob({
@@ -55,6 +61,12 @@ export class KnowledgeBaseProcessor extends WorkerHost {
           jobName: JOB_NAMES.rechunkArticle,
         },
       });
+      logStructured('info', 'worker.knowledge_rechunk.completed', {
+        jobId: payload.backgroundJobId,
+        articleId: payload.articleId,
+        attempts,
+        durationMs: Date.now() - startedAt,
+      });
     } catch (error) {
       await this.jobsService.markFailed({
         jobId: payload.backgroundJobId,
@@ -63,6 +75,11 @@ export class KnowledgeBaseProcessor extends WorkerHost {
           error instanceof Error
             ? error.message
             : 'Knowledge base rechunk worker failed',
+      });
+      logStructured('error', 'worker.knowledge_rechunk.failed', {
+        jobId: payload.backgroundJobId,
+        articleId: payload.articleId,
+        attempts,
       });
       throw error;
     }

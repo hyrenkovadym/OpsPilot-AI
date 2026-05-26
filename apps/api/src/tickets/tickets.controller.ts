@@ -24,6 +24,8 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
+import { RateLimit } from '../common/security/rate-limit.decorator';
+import { RateLimitGuard } from '../common/security/rate-limit.guard';
 import type { AuthenticatedUser } from '../common/types/jwt-payload.type';
 import { BackgroundJobResponseDto } from '../jobs/dto/background-job-response.dto';
 import { QueuedJobResponseDto } from '../jobs/dto/queued-job-response.dto';
@@ -147,6 +149,8 @@ export class TicketsController {
   }
 
   @Post(':id/ai/analyze')
+  @UseGuards(RateLimitGuard)
+  @RateLimit({ points: 60, durationSeconds: 60 })
   @Roles(Role.USER, Role.SUPPORT_AGENT, Role.ADMIN)
   @ApiOperation({ summary: 'Run AI analysis for a ticket' })
   @ApiCreatedResponse({

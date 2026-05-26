@@ -7,6 +7,10 @@
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 import {
+  logStructured,
+  safeErrorMessage,
+} from '../common/logging/structured-log.util';
+import {
   REALTIME_CHANNEL,
   type RealtimeEventEnvelope,
   type RealtimeEventName,
@@ -108,6 +112,11 @@ export class RealtimeService implements OnModuleInit, OnModuleDestroy {
     try {
       await this.publisher.publish(REALTIME_CHANNEL, JSON.stringify(envelope));
       this.emitToGateway(envelope);
+      logStructured('info', 'realtime.event.published', {
+        event,
+        rooms: options.rooms ?? [],
+        broadcast: options.broadcast ?? false,
+      });
     } catch (error) {
       this.logger.error(
         `Failed to publish realtime event ${event}: ${this.safeErrorMessage(error)}`,
@@ -158,9 +167,7 @@ export class RealtimeService implements OnModuleInit, OnModuleDestroy {
   }
 
   private safeErrorMessage(error: unknown): string {
-    const message =
-      error instanceof Error ? error.message : 'Unknown realtime error';
-    return message.replace(/sk-[a-zA-Z0-9_-]+/g, '[redacted]').slice(0, 240);
+    return safeErrorMessage(error, 'Unknown realtime error');
   }
 
   private async closeRedisClients(): Promise<void> {

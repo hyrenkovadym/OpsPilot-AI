@@ -40,6 +40,38 @@ function getRequiredEnv(
   return value;
 }
 
+function validateOriginList(value: string, variableName: string): string {
+  const origins = value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  if (origins.length === 0) {
+    throw new Error(
+      `Environment variable ${variableName} must include at least one origin`,
+    );
+  }
+
+  for (const origin of origins) {
+    let parsed: URL;
+    try {
+      parsed = new URL(origin);
+    } catch {
+      throw new Error(
+        `Environment variable ${variableName} includes invalid URL: ${origin}`,
+      );
+    }
+
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error(
+        `Environment variable ${variableName} includes unsupported protocol: ${origin}`,
+      );
+    }
+  }
+
+  return origins.join(',');
+}
+
 export function validateEnv(config: Record<string, unknown>): AppEnv {
   for (const variable of requiredVars) {
     getRequiredEnv(variable, config[variable]);
@@ -154,7 +186,10 @@ export function validateEnv(config: Record<string, unknown>): AppEnv {
       'JWT_REFRESH_SECRET',
       config.JWT_REFRESH_SECRET,
     ),
-    CORS_ORIGIN: getRequiredEnv('CORS_ORIGIN', config.CORS_ORIGIN),
+    CORS_ORIGIN: validateOriginList(
+      getRequiredEnv('CORS_ORIGIN', config.CORS_ORIGIN),
+      'CORS_ORIGIN',
+    ),
     AI_PROVIDER: provider,
     OPENAI_API_KEY: openaiApiKey,
     OPENAI_BASE_URL: openaiBaseUrl,
@@ -166,6 +201,9 @@ export function validateEnv(config: Record<string, unknown>): AppEnv {
     BULLMQ_DEFAULT_ATTEMPTS: bullmqDefaultAttempts,
     BULLMQ_BACKOFF_MS: bullmqBackoffMs,
     REALTIME_ENABLED: realtimeEnabled,
-    SOCKET_CORS_ORIGIN: socketCorsOrigin,
+    SOCKET_CORS_ORIGIN: validateOriginList(
+      socketCorsOrigin,
+      'SOCKET_CORS_ORIGIN',
+    ),
   };
 }

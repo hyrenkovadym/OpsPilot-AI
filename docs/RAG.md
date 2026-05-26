@@ -1,68 +1,63 @@
-# OpsPilot AI Simple RAG Notes (Phase 5)
+# OpsPilot AI Simple RAG Notes (Phase 7)
 
 ## What "Simple RAG" Means Here
-This phase adds retrieval-augmented behavior without introducing heavy vector infrastructure.
+This project uses a lightweight retrieval-augmented approach without a vector database yet.
 
-The flow is:
-1. ticket text is used as retrieval query
-2. relevant knowledge chunks are fetched deterministically
-3. chunks are passed into AI provider analysis
-4. AI result and source references are returned/stored
+Flow:
+1. ticket text becomes retrieval query
+2. relevant published KB chunks are selected deterministically
+3. chunks are passed to AI provider analysis
+4. AI result and source references are returned/stored on ticket
 
 ## Knowledge Base Lifecycle
-- Articles start as `DRAFT`
-- Published via `POST /knowledge-base/articles/:id/publish`
-- Archived via `POST /knowledge-base/articles/:id/archive`
-- Only `PUBLISHED` articles are used for ticket AI context retrieval
+- `DRAFT`
+- `PUBLISHED`
+- `ARCHIVED`
+
+Only `PUBLISHED` articles are used in ticket AI retrieval context.
 
 ## Chunking
-- Content is split into ordered chunks (`chunkIndex`)
-- Chunk size is lightweight (~800 chars default)
-- Empty chunks are ignored
-- Optional token estimate is stored
+- ordered chunks by `chunkIndex`
+- target size around ~800 chars
+- empty chunks are ignored
+- optional token estimate stored
 
 ## Retrieval Strategy
-`RetrievalService` computes deterministic score from:
+Deterministic scoring signals:
 - keyword overlap with chunk content
 - title match boost
-- article content match
 - category boost
+- content overlap
 
-Top-N results are returned with:
+Top-N result fields:
 - `articleId`
 - `articleTitle`
 - `chunkContent`
 - `score`
 
 ## AI Provider Behavior with Context
-
-### Mock Provider
+### Mock provider
 - default mode (`AI_PROVIDER=mock`)
 - deterministic and test-safe
-- context-aware summary/recommendation when retrieved chunks exist
+- includes context-aware recommendation language
 
-### OpenAI-Compatible Provider
+### OpenAI-compatible provider
 - optional (`AI_PROVIDER=openai`)
-- includes retrieved chunks in prompt
-- instructed to avoid inventing missing policy details
+- includes context chunks in prompt
 - validated structured JSON output required
 
-## Safety and Logging
-- Secrets/API keys are never logged
-- Audit captures safe metadata:
-  - retrieval count
-  - source article IDs
-  - provider used
-  - confidence and category/priority changes
+## Security and Observability Notes (Phase 7)
+- secrets/API keys are never logged
+- requestId is attached to related audit metadata where applicable
+- logs avoid full prompt/full KB raw content dumping
 
 ## Current Limitations
-- No semantic embeddings/vector similarity yet
-- No semantic reranker yet
-- No citation confidence calibration beyond deterministic scoring
+- no embeddings/vector similarity yet
+- no reranker layer
+- no advanced citation calibration
 
 ## Planned Upgrade Path
-Future phases can introduce:
+Future phase can add:
 1. pgvector or external vector DB
-2. embedding generation pipeline
-3. stronger retrieval/reranking strategies
-4. citation grounding quality metrics
+2. embedding generation
+3. reranking and citation quality scoring

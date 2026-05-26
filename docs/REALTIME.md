@@ -1,30 +1,27 @@
-﻿# OpsPilot AI Realtime (Phase 6)
+# OpsPilot AI Realtime (Phase 7)
 
 ## Overview
-Phase 6 adds Socket.IO realtime delivery on top of the existing REST + BullMQ architecture.
+Socket.IO realtime delivery runs on top of REST + BullMQ.
 
 Goals:
-- keep existing ticket/job workflow intact
-- deliver ticket and job lifecycle updates to connected clients
-- preserve polling fallback for reliability
+- stream ticket and job lifecycle updates to clients
+- keep existing polling fallback for reliability
+- preserve safe payload discipline
 
 ## Connection
-
 Socket endpoint:
-- `http://localhost:4000` (same API host/port)
+- `http://localhost:4000`
 
 Client auth:
-- pass JWT access token in Socket.IO auth payload:
 ```ts
 io('http://localhost:4000', {
-  auth: { token: '<access-token>' },
+  auth: { token: '<jwt-access-token>' },
 });
 ```
 
-Invalid or missing token results in safe connection rejection.
+Invalid/missing token is rejected safely.
 
 ## Rooms and Access
-
 Server-managed rooms:
 - `support:all`
 - `admin:all`
@@ -32,16 +29,13 @@ Server-managed rooms:
 - `ticket:{ticketId}`
 - `job:{jobId}`
 
-Subscription events:
+Client subscription events:
 - `subscribe.ticket` / `unsubscribe.ticket`
 - `subscribe.job` / `unsubscribe.job`
 
-Permission checks:
-- users can subscribe only to tickets/jobs they are allowed to view
-- support/admin can subscribe across broader operational scope
+Permission checks are enforced before joining ticket/job rooms.
 
-## Event Model
-
+## Event Names
 Ticket events:
 - `ticket.created`
 - `ticket.updated`
@@ -55,7 +49,7 @@ Job events:
 - `job.completed`
 - `job.failed`
 
-AI/KB job domain events:
+Domain job events:
 - `ticket.ai.queued`
 - `ticket.ai.processing`
 - `ticket.ai.completed`
@@ -65,45 +59,38 @@ AI/KB job domain events:
 - `knowledge.rechunk.completed`
 - `knowledge.rechunk.failed`
 
-Optional audit stream:
+Audit stream:
 - `audit.created`
 
 ## Worker/API Delivery Bridge
+- Worker publishes realtime envelopes to Redis channel.
+- API subscribes and emits through gateway.
+- API-originated events use the same RealtimeService path.
 
-Because worker and API run as separate processes:
-- worker publishes realtime envelopes through Redis pub/sub
-- API subscribes to channel and emits to Socket.IO clients
-- API-originated events also pass through the same service path
+This keeps delivery consistent in separate API/worker processes.
 
-This keeps event delivery consistent across processes.
+## Security and Safety
+Realtime payloads include safe operational fields only:
+- ids
+- status
+- category/priority
+- attempts
+- timestamps
+- short reason/message
 
-## Polling Fallback
-
-Polling remains supported and is not removed:
-- ticket detail and KB detail still poll job status during async operations
-- websocket events can accelerate UX, while polling covers reconnects and missed events
-
-## Safety
-
-Realtime payloads include safe fields only:
-- ids, status, category/priority, attempts, timestamps, short messages
-
-Excluded from payloads:
+Excluded from realtime payloads:
+- tokens
 - password hashes
-- JWT tokens
 - API keys
 - stack traces
-- full prompts / full KB raw content
+- full prompts and full KB raw content
 
-## Environment
+## Observability Notes (Phase 7)
+Realtime publishing logs structured events with safe metadata.
 
-Required/relevant env:
-- `REALTIME_ENABLED=true`
-- `SOCKET_CORS_ORIGIN=http://localhost:3000`
-- `BULLMQ_REDIS_URL=...` (used by pub/sub bridge)
+## Polling Fallback
+Polling remains intentionally enabled for:
+- ticket AI job tracking
+- KB rechunk tracking
 
-## Known Limitations
-
-- No WebSocket presence indicators yet
-- No per-event acknowledgement/replay layer
-- Realtime dashboards use simple refresh hints rather than full client cache sync
+Frontend uses realtime to reduce latency and polling as fallback for reconnect/missed-event scenarios.

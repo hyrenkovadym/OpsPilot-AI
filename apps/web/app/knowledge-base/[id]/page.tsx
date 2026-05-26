@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
@@ -49,6 +49,9 @@ export default function KnowledgeArticleDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [jobMessage, setJobMessage] = useState<string | null>(null);
+  const [realtimeStatus, setRealtimeStatus] = useState<
+    'connecting' | 'connected' | 'disconnected'
+  >('disconnected');
 
   const socketRef = useRef<ReturnType<typeof connectRealtime>>(null);
   const terminalJobStatesRef = useRef<Map<string, 'COMPLETED' | 'FAILED'>>(
@@ -73,7 +76,7 @@ export default function KnowledgeArticleDetailPage() {
       setForm(toFormState(response));
     } catch (fetchError) {
       if (fetchError instanceof ApiError) {
-        setError(fetchError.message);
+        setError(formatApiError(fetchError));
       } else {
         setError('Could not load article.');
       }
@@ -99,6 +102,14 @@ export default function KnowledgeArticleDetailPage() {
     }
 
     socketRef.current = socket;
+    setRealtimeStatus(socket.connected ? 'connected' : 'connecting');
+
+    const onConnect = () => setRealtimeStatus('connected');
+    const onDisconnect = () => setRealtimeStatus('disconnected');
+    const onConnectError = () => setRealtimeStatus('disconnected');
+    socket.on('connect', onConnect);
+    socket.on('disconnect', onDisconnect);
+    socket.on('connect_error', onConnectError);
 
     const unsubscribers = [
       onRealtimeEvent<Record<string, unknown>>(
@@ -156,6 +167,9 @@ export default function KnowledgeArticleDetailPage() {
       for (const unsubscribe of unsubscribers) {
         unsubscribe();
       }
+      socket.off('connect', onConnect);
+      socket.off('disconnect', onDisconnect);
+      socket.off('connect_error', onConnectError);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.id]);
@@ -180,7 +194,7 @@ export default function KnowledgeArticleDetailPage() {
       setSuccess('Article updated.');
     } catch (submitError) {
       if (submitError instanceof ApiError) {
-        setError(submitError.message);
+        setError(formatApiError(submitError));
       } else {
         setError('Could not update article.');
       }
@@ -206,7 +220,7 @@ export default function KnowledgeArticleDetailPage() {
       setSuccess(successMessage);
     } catch (actionError) {
       if (actionError instanceof ApiError) {
-        setError(actionError.message);
+        setError(formatApiError(actionError));
       } else {
         setError('Request failed.');
       }
@@ -247,7 +261,7 @@ export default function KnowledgeArticleDetailPage() {
       }
     } catch (actionError) {
       if (actionError instanceof ApiError) {
-        setError(actionError.message);
+        setError(formatApiError(actionError));
       } else {
         setError('Could not rechunk article.');
       }
@@ -307,6 +321,7 @@ export default function KnowledgeArticleDetailPage() {
       {error ? <p className="warning">{error}</p> : null}
       {success ? <p className="helper-text">{success}</p> : null}
       {jobMessage ? <p className="helper-text">{jobMessage}</p> : null}
+      <p className="helper-text">Realtime: {realtimeStatus}</p>
 
       {!loading && !error && article && form ? (
         <>
@@ -450,4 +465,11 @@ export default function KnowledgeArticleDetailPage() {
       ) : null}
     </PageSection>
   );
+}
+
+function formatApiError(error: ApiError): string {
+  if (error.requestId && !error.message.includes('requestId:')) {
+    return `${error.message} (requestId: ${error.requestId})`;
+  }
+  return error.message;
 }

@@ -1,7 +1,7 @@
 # OpsPilot AI Roadmap
 
 ## Phase 1 (Completed)
-- Monorepo setup (API + Web)
+- Monorepo setup (API + web)
 - Core NestJS modules
 - Prisma schema baseline
 - JWT + RBAC foundation
@@ -9,7 +9,7 @@
 - Docker and CI foundation
 
 ## Phase 2 (Completed)
-- Ticket lifecycle workflow (assign/status/priority/update)
+- Ticket lifecycle workflow
 - Filtering and pagination
 - Role-enforced visibility rules
 - Frontend API wiring for auth/tickets
@@ -19,37 +19,38 @@
 - Deterministic mock AI default
 - Optional OpenAI-compatible provider
 - Ticket AI analyze/suggestion endpoints
-- AI audit events and safe fallback handling
+- Safe AI fallback and audit events
 
 ## Phase 4 (Completed)
-- Knowledge base module with CRUD and lifecycle actions
+- Knowledge base module with CRUD lifecycle
 - Article chunking and deterministic retrieval
-- Simple RAG-like context injection into ticket AI analysis
-- Context sources persisted and returned in AI responses
-- Frontend knowledge base management pages
-- Expanded backend tests for permissions, retrieval, and AI context flow
+- RAG-style context injection into ticket AI analysis
+- Context sources persisted and returned
 
-## Phase 5 (Completed): BullMQ Background Jobs
-- Async ticket analysis jobs
-- Async knowledge base rechunk jobs
-- Retry/backoff handling
-- Worker runtime + Docker worker service
-- Background job status endpoints and polling-ready frontend UX
+## Phase 5 (Completed)
+- BullMQ background jobs
+- Worker runtime and Docker worker service
+- Async ticket AI analysis and KB rechunking
+- Background job status endpoints and polling UX
 
-## Phase 6 (Completed): Socket.IO Real-Time Updates
-- Real-time ticket status/assignment updates
-- Live queue refresh for support views
-- Authenticated event channels
-- Worker-safe event delivery through Redis pub/sub bridge
-- Frontend live updates with polling fallback
+## Phase 6 (Completed)
+- Socket.IO realtime updates
+- JWT-authenticated socket connections
+- Role-aware room subscriptions
+- Redis pub/sub bridge between API and worker
+- Frontend realtime hints with polling fallback preserved
 
-## Phase 7 (Next): Observability and Security Hardening
-- Structured logs and trace correlation
-- Metrics and alerting
-- Security polish (rate limiting, session/token hardening, policy docs)
+## Phase 7 (Completed)
+- Request ID middleware (`X-Request-ID`) and propagation
+- Structured JSON logs for API and worker lifecycle
+- Global safe error response filter with `requestId`
+- Improved `/health`, `/ready`, `/system/info`
+- Route-level rate limiting for sensitive endpoints
+- Security headers and stricter CORS validation
+- Audit metadata polish and job observability improvements
 
-## Phase 8: Final Portfolio Release
-- UX/docs polish
-- deployment guide
-- architecture diagrams
-- recruiter-facing walkthrough demo
+## Phase 8 (Next): Final Portfolio Release
+- Final docs and architecture diagrams polish
+- Deployment and operations runbook
+- Security/observability checklist sign-off
+- Recruiter/demo walkthrough preparation

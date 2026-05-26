@@ -24,12 +24,14 @@ export class SocketAuthGuard {
       throw new UnauthorizedException('JWT secret is not configured');
     }
 
-    const payload = await this.jwtService.verifyAsync<AuthenticatedUser>(
-      token,
-      {
+    let payload: AuthenticatedUser;
+    try {
+      payload = await this.jwtService.verifyAsync<AuthenticatedUser>(token, {
         secret,
-      },
-    );
+      });
+    } catch {
+      throw new UnauthorizedException('Invalid access token');
+    }
 
     const user = await this.usersService.findById(payload.sub);
     if (!user) {

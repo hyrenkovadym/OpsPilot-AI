@@ -17,6 +17,8 @@ import {
 } from '@nestjs/swagger';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { RateLimit } from '../common/security/rate-limit.decorator';
+import { RateLimitGuard } from '../common/security/rate-limit.guard';
 import type { AuthenticatedUser } from '../common/types/jwt-payload.type';
 import { PublicUserDto } from '../users/dto/public-user.dto';
 import { AuthService } from './auth.service';
@@ -30,6 +32,8 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post('register')
+  @UseGuards(RateLimitGuard)
+  @RateLimit({ points: 120, durationSeconds: 60 })
   @ApiOperation({ summary: 'Register a new user account' })
   @ApiCreatedResponse({ type: AuthResponseDto })
   register(@Body() dto: RegisterDto): Promise<AuthResponseDto> {
@@ -38,6 +42,8 @@ export class AuthController {
 
   @Post('login')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(RateLimitGuard)
+  @RateLimit({ points: 120, durationSeconds: 60 })
   @ApiOperation({ summary: 'Log in with email and password' })
   @ApiOkResponse({ type: AuthResponseDto })
   @ApiUnauthorizedResponse({ description: 'Invalid credentials' })

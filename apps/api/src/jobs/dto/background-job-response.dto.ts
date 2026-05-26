@@ -34,4 +34,7 @@ export class BackgroundJobResponseDto {
 
   @ApiProperty({ required: false, nullable: true })
   finishedAt!: Date | null;
+
+  @ApiProperty({ required: false, nullable: true })
+  durationMs!: number | null;
 }

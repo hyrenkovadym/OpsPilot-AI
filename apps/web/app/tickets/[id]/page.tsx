@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
@@ -36,6 +36,9 @@ export default function TicketDetailsPage() {
   const [actionLoading, setActionLoading] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiJobMessage, setAiJobMessage] = useState<string | null>(null);
+  const [realtimeStatus, setRealtimeStatus] = useState<
+    'connecting' | 'connected' | 'disconnected'
+  >('disconnected');
 
   const socketRef = useRef<ReturnType<typeof connectRealtime>>(null);
   const terminalJobStatesRef = useRef<Map<string, 'COMPLETED' | 'FAILED'>>(
@@ -58,7 +61,7 @@ export default function TicketDetailsPage() {
       setTicket(response);
     } catch (fetchError) {
       if (fetchError instanceof ApiError) {
-        setError(fetchError.message);
+        setError(formatApiError(fetchError));
       } else {
         setError('Failed to load ticket.');
       }
@@ -84,6 +87,15 @@ export default function TicketDetailsPage() {
     }
 
     socketRef.current = socket;
+    setRealtimeStatus(socket.connected ? 'connected' : 'connecting');
+
+    const onConnect = () => setRealtimeStatus('connected');
+    const onDisconnect = () => setRealtimeStatus('disconnected');
+    const onConnectError = () => setRealtimeStatus('disconnected');
+    socket.on('connect', onConnect);
+    socket.on('disconnect', onDisconnect);
+    socket.on('connect_error', onConnectError);
+
     subscribeTicketRoom(socket, params.id);
 
     const unsubscribers = [
@@ -151,6 +163,9 @@ export default function TicketDetailsPage() {
         unsubscribe();
       }
       unsubscribeTicketRoom(socket, params.id);
+      socket.off('connect', onConnect);
+      socket.off('disconnect', onDisconnect);
+      socket.off('connect_error', onConnectError);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.id]);
@@ -170,7 +185,7 @@ export default function TicketDetailsPage() {
       setTicket(updated);
     } catch (actionError) {
       if (actionError instanceof ApiError) {
-        setError(actionError.message);
+        setError(formatApiError(actionError));
       } else {
         setError('Could not update ticket status.');
       }
@@ -195,7 +210,7 @@ export default function TicketDetailsPage() {
       setTicket(updated);
     } catch (actionError) {
       if (actionError instanceof ApiError) {
-        setError(actionError.message);
+        setError(formatApiError(actionError));
       } else {
         setError('Could not assign ticket.');
       }
@@ -249,7 +264,7 @@ export default function TicketDetailsPage() {
       );
     } catch (actionError) {
       if (actionError instanceof ApiError) {
-        setError(actionError.message);
+        setError(formatApiError(actionError));
       } else {
         setError('Could not run AI analysis.');
       }
@@ -324,7 +339,7 @@ export default function TicketDetailsPage() {
       );
     } catch (actionError) {
       if (actionError instanceof ApiError) {
-        setError(actionError.message);
+        setError(formatApiError(actionError));
       } else {
         setError('Could not refresh AI suggestion.');
       }
@@ -343,6 +358,7 @@ export default function TicketDetailsPage() {
       {loading ? <p className="helper-text">Loading ticket...</p> : null}
       {error ? <p className="warning">{error}</p> : null}
       {aiJobMessage ? <p className="helper-text">{aiJobMessage}</p> : null}
+      <p className="helper-text">Realtime: {realtimeStatus}</p>
       {!loading && !error && !ticket ? (
         <p className="helper-text">Ticket not found.</p>
       ) : null}
@@ -481,4 +497,11 @@ export default function TicketDetailsPage() {
       </div>
     </PageSection>
   );
+}
+
+function formatApiError(error: ApiError): string {
+  if (error.requestId && !error.message.includes('requestId:')) {
+    return `${error.message} (requestId: ${error.requestId})`;
+  }
+  return error.message;
 }

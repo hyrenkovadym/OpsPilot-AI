@@ -1,6 +1,7 @@
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
+import { logStructured } from './common/logging/structured-log.util';
 import { WorkersAppModule } from './workers/workers-app.module';
 
 async function bootstrapWorker(): Promise<void> {
@@ -19,6 +20,11 @@ async function bootstrapWorker(): Promise<void> {
   logger.log(
     `OpsPilot worker started (QUEUE_MODE=${queueMode}, redis=${redisUrl})`,
   );
+  logStructured('info', 'worker.started', {
+    queueMode,
+    redisConfigured: Boolean(redisUrl),
+    pid: process.pid,
+  });
 }
 
 void bootstrapWorker();

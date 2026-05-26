@@ -13,6 +13,10 @@ import {
   Prisma,
 } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
+import {
+  logStructured,
+  safeErrorMessage,
+} from '../common/logging/structured-log.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { JOB_NAMES } from './job-names';
 import {
@@ -229,6 +233,15 @@ export class JobsService {
     this.logger.log(
       `Job started: id=${updated.id} type=${updated.type} entity=${updated.entityType}:${updated.entityId} attempts=${updated.attempts}`,
     );
+    logStructured('info', 'job.processing', {
+      jobId: updated.id,
+      jobType: updated.type,
+      entityType: updated.entityType,
+      entityId: updated.entityId,
+      status: updated.status,
+      attempts: updated.attempts,
+      startedAt: updated.startedAt?.toISOString() ?? null,
+    });
     return updated;
   }
 
@@ -259,6 +272,16 @@ export class JobsService {
     this.logger.log(
       `Job completed: id=${updated.id} type=${updated.type} entity=${updated.entityType}:${updated.entityId} durationMs=${durationMs}`,
     );
+    logStructured('info', 'job.completed', {
+      jobId: updated.id,
+      jobType: updated.type,
+      entityType: updated.entityType,
+      entityId: updated.entityId,
+      status: updated.status,
+      attempts: updated.attempts,
+      durationMs,
+      finishedAt: updated.finishedAt?.toISOString() ?? null,
+    });
     return updated;
   }
 
@@ -281,6 +304,16 @@ export class JobsService {
     this.logger.error(
       `Job failed: id=${updated.id} type=${updated.type} entity=${updated.entityType}:${updated.entityId} attempts=${updated.attempts} reason=${input.reason.slice(0, 120)}`,
     );
+    logStructured('error', 'job.failed', {
+      jobId: updated.id,
+      jobType: updated.type,
+      entityType: updated.entityType,
+      entityId: updated.entityId,
+      status: updated.status,
+      attempts: updated.attempts,
+      reason: input.reason.slice(0, 120),
+      finishedAt: updated.finishedAt?.toISOString() ?? null,
+    });
     return updated;
   }
 
@@ -293,8 +326,6 @@ export class JobsService {
   }
 
   private safeErrorMessage(error: unknown): string {
-    const message =
-      error instanceof Error ? error.message : 'Unknown background job error';
-    return message.replace(/sk-[a-zA-Z0-9_-]+/g, '[redacted]').slice(0, 240);
+    return safeErrorMessage(error, 'Unknown background job error');
   }
 }
