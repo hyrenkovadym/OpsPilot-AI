@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+apps/api/dist/
+apps/api/coverage/
+apps/web/.next/
+apps/web/out/
+dist/
+coverage/
+.next/
+logs/
+playwright-report/
+apps/web/playwright-report/
+apps/web/test-results/
+
+# Environment
+.env
+.env.*
+.env.local
+!.env.example
+apps/api/.env
+apps/web/.env
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+
+# Prisma
+apps/api/prisma/dev.db
+apps/api/prisma/dev.db-journal
+
+# Secrets and credentials
+*credentials*.json
+*secret*.key
+*service-account*.json
+service-account.json
+credentials.json

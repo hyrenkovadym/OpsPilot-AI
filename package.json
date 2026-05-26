@@ -1,0 +1,26 @@
+{
+  "name": "opspilot-ai",
+  "private": true,
+  "version": "0.1.0",
+  "description": "OpsPilot AI monorepo",
+  "workspaces": [
+    "apps/api",
+    "apps/web"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run start:dev -w @opspilot/api\" \"npm run dev -w @opspilot/web\"",
+    "build": "npm run build -w @opspilot/api && npm run build -w @opspilot/web",
+    "test": "npm run test -w @opspilot/api",
+    "lint": "npm run lint -w @opspilot/api && npm run lint -w @opspilot/web",
+    "test:e2e": "npm run test:e2e -w @opspilot/web",
+    "worker": "npm run worker -w @opspilot/api"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  },
+  "engines": {
+    "node": ">=22.0.0",
+    "npm": ">=10.0.0"
+  }
+}
+
