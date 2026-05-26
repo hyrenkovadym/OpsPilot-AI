@@ -9,6 +9,7 @@ import { AiAnalysisResponseDto } from '../ai/dto/ai-analysis-response.dto';
 import { AiService } from '../ai/ai.service';
 import { AuditService } from '../audit/audit.service';
 import type { AuthenticatedUser } from '../common/types/jwt-payload.type';
+import { RetrievalService } from '../knowledge-base/retrieval.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AssignTicketDto } from './dto/assign-ticket.dto';
 import { CreateTicketDto } from './dto/create-ticket.dto';
@@ -45,12 +46,15 @@ type TicketWithUsers = Prisma.TicketGetPayload<{
   include: typeof ticketDetailsInclude;
 }>;
 
+type ContextSource = { articleId: string; title: string; score: number };
+
 @Injectable()
 export class TicketsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
     private readonly aiService: AiService,
+    private readonly retrievalService: RetrievalService,
   ) {}
 
   async create(
@@ -300,14 +304,39 @@ export class TicketsService {
     const provider = this.aiService.getProviderName();
 
     try {
-      const analysis = await this.aiService.analyzeTicket({
-        id: existing.id,
+      const contextChunks = await this.retrievalService.retrieveForTicket({
         title: existing.title,
         description: existing.description,
         category: existing.category,
-        priority: existing.priority,
-        status: existing.status,
       });
+
+      const contextSources = this.mapContextSources(contextChunks);
+
+      await this.auditService.log({
+        actorId: user.sub,
+        action: 'ticket_ai_context_retrieved',
+        entityType: 'ticket',
+        entityId: id,
+        metadata: {
+          ticketId: id,
+          retrievedCount: contextChunks.length,
+          sourceArticleIds: Array.from(
+            new Set(contextChunks.map((item) => item.articleId)),
+          ),
+        },
+      });
+
+      const analysis = await this.aiService.analyzeTicket(
+        {
+          id: existing.id,
+          title: existing.title,
+          description: existing.description,
+          category: existing.category,
+          priority: existing.priority,
+          status: existing.status,
+        },
+        contextChunks,
+      );
 
       await this.prisma.ticket.update({
         where: { id },
@@ -317,6 +346,7 @@ export class TicketsService {
           aiSummary: analysis.aiSummary,
           aiConfidence: analysis.aiConfidence,
           aiRecommendedAction: analysis.recommendedAction,
+          aiContextSourcesJson: contextSources,
         },
       });
 
@@ -332,10 +362,15 @@ export class TicketsService {
           previousPriority,
           newCategory: analysis.category,
           newPriority: analysis.priority,
+          contextSourcesCount: contextSources.length,
         },
       });
 
-      return AiAnalysisResponseDto.fromAnalysis(analysis, provider);
+      return AiAnalysisResponseDto.fromAnalysis(
+        analysis,
+        provider,
+        contextSources,
+      );
     } catch (error) {
       await this.auditService.log({
         actorId: user.sub,
@@ -363,6 +398,7 @@ export class TicketsService {
     this.assertCanViewTicket(user, ticket.createdById);
 
     const provider = this.aiService.getProviderName();
+    const storedSources = this.parseContextSources(ticket.aiContextSourcesJson);
 
     if (
       ticket.aiSummary &&
@@ -378,20 +414,35 @@ export class TicketsService {
           recommendedAction: ticket.aiRecommendedAction,
         },
         provider,
+        storedSources,
       );
     }
 
     try {
-      const analysis = await this.aiService.analyzeTicket({
-        id: ticket.id,
+      const contextChunks = await this.retrievalService.retrieveForTicket({
         title: ticket.title,
         description: ticket.description,
         category: ticket.category,
-        priority: ticket.priority,
-        status: ticket.status,
       });
+      const contextSources = this.mapContextSources(contextChunks);
 
-      return AiAnalysisResponseDto.fromAnalysis(analysis, provider);
+      const analysis = await this.aiService.analyzeTicket(
+        {
+          id: ticket.id,
+          title: ticket.title,
+          description: ticket.description,
+          category: ticket.category,
+          priority: ticket.priority,
+          status: ticket.status,
+        },
+        contextChunks,
+      );
+
+      return AiAnalysisResponseDto.fromAnalysis(
+        analysis,
+        provider,
+        contextSources,
+      );
     } catch (error) {
       await this.auditService.log({
         actorId: user.sub,
@@ -481,6 +532,7 @@ export class TicketsService {
       aiSummary: ticket.aiSummary,
       aiConfidence: ticket.aiConfidence,
       aiRecommendedAction: ticket.aiRecommendedAction,
+      aiContextSourcesJson: ticket.aiContextSourcesJson,
       createdAt: ticket.createdAt,
       updatedAt: ticket.updatedAt,
       createdBy: {
@@ -567,5 +619,44 @@ export class TicketsService {
   private safeErrorMessage(error: unknown): string {
     const message = error instanceof Error ? error.message : 'Unknown AI error';
     return message.replace(/sk-[a-zA-Z0-9_-]+/g, '[redacted]').slice(0, 240);
+  }
+
+  private mapContextSources(
+    chunks: Array<{ articleId: string; articleTitle: string; score: number }>,
+  ): ContextSource[] {
+    return chunks.map((item) => ({
+      articleId: item.articleId,
+      title: item.articleTitle,
+      score: item.score,
+    }));
+  }
+
+  private parseContextSources(value: unknown): ContextSource[] | null {
+    if (!Array.isArray(value)) {
+      return null;
+    }
+
+    const parsed = value
+      .map((item) => {
+        if (typeof item !== 'object' || item === null) {
+          return null;
+        }
+        const row = item as Record<string, unknown>;
+        if (
+          typeof row.articleId === 'string' &&
+          typeof row.title === 'string' &&
+          typeof row.score === 'number'
+        ) {
+          return {
+            articleId: row.articleId,
+            title: row.title,
+            score: row.score,
+          };
+        }
+        return null;
+      })
+      .filter((item): item is ContextSource => item !== null);
+
+    return parsed.length > 0 ? parsed : null;
   }
 }

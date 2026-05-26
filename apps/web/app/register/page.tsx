@@ -46,6 +46,7 @@ export default function RegisterPage() {
           <input
             type="text"
             name="fullName"
+            data-testid="register-full-name"
             value={fullName}
             onChange={(event) => setFullName(event.target.value)}
             placeholder="Jane Doe"
@@ -57,6 +58,7 @@ export default function RegisterPage() {
           <input
             type="email"
             name="email"
+            data-testid="register-email"
             value={email}
             onChange={(event) => setEmail(event.target.value)}
             placeholder="jane.doe@company.com"
@@ -68,6 +70,7 @@ export default function RegisterPage() {
           <input
             type="password"
             name="password"
+            data-testid="register-password"
             value={password}
             onChange={(event) => setPassword(event.target.value)}
             placeholder="Use a strong password"
@@ -75,7 +78,12 @@ export default function RegisterPage() {
             required
           />
         </label>
-        <button type="submit" className="btn" disabled={submitting}>
+        <button
+          type="submit"
+          className="btn"
+          data-testid="register-submit"
+          disabled={submitting}
+        >
           {submitting ? 'Creating...' : 'Create Account'}
         </button>
       </form>

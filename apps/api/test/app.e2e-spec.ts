@@ -2,6 +2,10 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import {
   AuditLog,
+  KnowledgeArticleStatus,
+  KnowledgeBaseArticle,
+  KnowledgeBaseChunk,
+  Prisma,
   Role,
   Ticket,
   TicketCategory,
@@ -35,16 +39,41 @@ interface TicketListResponse {
   };
 }
 
+interface KnowledgeListResponse {
+  data: Array<{
+    id: string;
+    title: string;
+    category: TicketCategory;
+    status: KnowledgeArticleStatus;
+    chunksCount: number;
+  }>;
+  meta: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+}
+
 type UserSummary = Pick<User, 'id' | 'email' | 'fullName' | 'role'>;
 type TicketWithUsers = Ticket & {
   createdBy: UserSummary;
   assignedTo: UserSummary | null;
 };
 
+type KnowledgeArticleWithChunks = KnowledgeBaseArticle & {
+  chunks: KnowledgeBaseChunk[];
+  _count?: {
+    chunks: number;
+  };
+};
+
 class MockPrismaService {
   public readonly users: User[] = [];
   public readonly tickets: Ticket[] = [];
   public readonly auditLogs: AuditLog[] = [];
+  public readonly knowledgeArticles: KnowledgeBaseArticle[] = [];
+  public readonly knowledgeChunks: KnowledgeBaseChunk[] = [];
 
   private mapUserSummary(user: User): UserSummary {
     return {
@@ -133,6 +162,67 @@ class MockPrismaService {
     });
   }
 
+  private applyArticleWhere(
+    articles: KnowledgeBaseArticle[],
+    where?: {
+      status?: KnowledgeArticleStatus;
+      category?: TicketCategory;
+      OR?: Array<{
+        title?: { contains: string; mode?: 'insensitive' };
+        content?: { contains: string; mode?: 'insensitive' };
+      }>;
+    },
+  ): KnowledgeBaseArticle[] {
+    if (!where) {
+      return [...articles];
+    }
+
+    return articles.filter((article) => {
+      if (where.status && article.status !== where.status) {
+        return false;
+      }
+      if (where.category && article.category !== where.category) {
+        return false;
+      }
+
+      if (where.OR && where.OR.length > 0) {
+        const matches = where.OR.some((clause) => {
+          if (clause.title?.contains) {
+            return article.title
+              .toLowerCase()
+              .includes(clause.title.contains.toLowerCase());
+          }
+          if (clause.content?.contains) {
+            return article.content
+              .toLowerCase()
+              .includes(clause.content.contains.toLowerCase());
+          }
+          return false;
+        });
+
+        if (!matches) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }
+
+  private mapArticleWithChunks(
+    article: KnowledgeBaseArticle,
+    includeCount: boolean,
+  ): KnowledgeArticleWithChunks {
+    const chunks = this.knowledgeChunks
+      .filter((chunk) => chunk.articleId === article.id)
+      .sort((a, b) => a.chunkIndex - b.chunkIndex);
+    return {
+      ...article,
+      chunks,
+      ...(includeCount ? { _count: { chunks: chunks.length } } : {}),
+    };
+  }
+
   public user = {
     findUnique: async (args: {
       where: { id?: string; email?: string };
@@ -208,6 +298,7 @@ class MockPrismaService {
         aiSummary: null,
         aiConfidence: null,
         aiRecommendedAction: null,
+        aiContextSourcesJson: null,
         createdAt: now,
         updatedAt: now,
       };
@@ -289,6 +380,7 @@ class MockPrismaService {
         aiSummary?: string;
         aiConfidence?: number;
         aiRecommendedAction?: string;
+        aiContextSourcesJson?: Prisma.InputJsonValue;
       };
       include?: unknown;
     }): Promise<Ticket | TicketWithUsers> => {
@@ -301,11 +393,218 @@ class MockPrismaService {
       const updated: Ticket = {
         ...existing,
         ...args.data,
+        aiContextSourcesJson:
+          args.data.aiContextSourcesJson === undefined
+            ? existing.aiContextSourcesJson
+            : args.data.aiContextSourcesJson,
         updatedAt: new Date(),
       };
 
       this.tickets[index] = updated;
       return args.include ? this.enrichTicket(updated) : updated;
+    },
+  };
+
+  public knowledgeBaseArticle = {
+    create: async (args: {
+      data: {
+        title: string;
+        content: string;
+        category: TicketCategory;
+        status: KnowledgeArticleStatus;
+        createdById: string;
+        updatedById?: string | null;
+        chunks?: {
+          createMany: {
+            data: Array<{
+              chunkIndex: number;
+              content: string;
+              tokensEstimate?: number | null;
+              embeddingJson?: Prisma.JsonValue | null;
+            }>;
+          };
+        };
+      };
+      include?: { _count?: { select: { chunks: boolean } } };
+    }): Promise<KnowledgeArticleWithChunks> => {
+      const now = new Date();
+      const article: KnowledgeBaseArticle = {
+        id: randomUUID(),
+        title: args.data.title,
+        content: args.data.content,
+        category: args.data.category,
+        status: args.data.status,
+        createdById: args.data.createdById,
+        updatedById: args.data.updatedById ?? null,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      this.knowledgeArticles.push(article);
+
+      const chunkData = args.data.chunks?.createMany.data ?? [];
+      for (const chunk of chunkData) {
+        this.knowledgeChunks.push({
+          id: randomUUID(),
+          articleId: article.id,
+          chunkIndex: chunk.chunkIndex,
+          content: chunk.content,
+          tokensEstimate: chunk.tokensEstimate ?? null,
+          embeddingJson: (chunk.embeddingJson as Prisma.JsonValue) ?? null,
+          createdAt: now,
+        });
+      }
+
+      return this.mapArticleWithChunks(article, Boolean(args.include?._count));
+    },
+    findMany: async (args: {
+      where?: {
+        status?: KnowledgeArticleStatus;
+        category?: TicketCategory;
+        OR?: Array<{
+          title?: { contains: string; mode?: 'insensitive' };
+          content?: { contains: string; mode?: 'insensitive' };
+        }>;
+      };
+      include?: { chunks?: boolean; _count?: { select: { chunks: boolean } } };
+      orderBy?: { updatedAt: 'asc' | 'desc' };
+      skip?: number;
+      take?: number;
+    }): Promise<KnowledgeArticleWithChunks[]> => {
+      const filtered = this.applyArticleWhere(
+        this.knowledgeArticles,
+        args.where,
+      );
+      const ordered = [...filtered].sort((a, b) =>
+        args.orderBy?.updatedAt === 'asc'
+          ? a.updatedAt.getTime() - b.updatedAt.getTime()
+          : b.updatedAt.getTime() - a.updatedAt.getTime(),
+      );
+      const skip = args.skip ?? 0;
+      const take = args.take ?? ordered.length;
+      const paged = ordered.slice(skip, skip + take);
+      return paged.map((article) =>
+        this.mapArticleWithChunks(article, Boolean(args.include?._count)),
+      );
+    },
+    count: async (args: {
+      where?: {
+        status?: KnowledgeArticleStatus;
+        category?: TicketCategory;
+        OR?: Array<{
+          title?: { contains: string; mode?: 'insensitive' };
+          content?: { contains: string; mode?: 'insensitive' };
+        }>;
+      };
+    }): Promise<number> => {
+      return this.applyArticleWhere(this.knowledgeArticles, args.where).length;
+    },
+    findUnique: async (args: {
+      where: { id: string };
+      include?: { _count?: { select: { chunks: boolean } } };
+    }): Promise<KnowledgeArticleWithChunks | null> => {
+      const article = this.knowledgeArticles.find(
+        (item) => item.id === args.where.id,
+      );
+      if (!article) {
+        return null;
+      }
+      return this.mapArticleWithChunks(article, Boolean(args.include?._count));
+    },
+    update: async (args: {
+      where: { id: string };
+      data: {
+        title?: string;
+        content?: string;
+        category?: TicketCategory;
+        status?: KnowledgeArticleStatus;
+        updatedById?: string | null;
+        updatedBy?: {
+          connect: { id: string };
+        };
+      };
+      include?: { _count?: { select: { chunks: boolean } } };
+    }): Promise<KnowledgeArticleWithChunks> => {
+      const index = this.knowledgeArticles.findIndex(
+        (item) => item.id === args.where.id,
+      );
+      if (index < 0) {
+        throw new Error('Knowledge article not found in mock update');
+      }
+      const existing = this.knowledgeArticles[index];
+      const updated: KnowledgeBaseArticle = {
+        ...existing,
+        title: args.data.title ?? existing.title,
+        content: args.data.content ?? existing.content,
+        category: args.data.category ?? existing.category,
+        status: args.data.status ?? existing.status,
+        updatedById:
+          args.data.updatedBy?.connect.id ??
+          (args.data.updatedById === undefined
+            ? existing.updatedById
+            : args.data.updatedById),
+        updatedAt: new Date(),
+      };
+      this.knowledgeArticles[index] = updated;
+      return this.mapArticleWithChunks(updated, Boolean(args.include?._count));
+    },
+    delete: async (args: {
+      where: { id: string };
+    }): Promise<KnowledgeBaseArticle> => {
+      const index = this.knowledgeArticles.findIndex(
+        (item) => item.id === args.where.id,
+      );
+      if (index < 0) {
+        throw new Error('Knowledge article not found in mock delete');
+      }
+      const [deleted] = this.knowledgeArticles.splice(index, 1);
+      this.knowledgeChunks.splice(
+        0,
+        this.knowledgeChunks.length,
+        ...this.knowledgeChunks.filter(
+          (chunk) => chunk.articleId !== deleted.id,
+        ),
+      );
+      return deleted;
+    },
+  };
+
+  public knowledgeBaseChunk = {
+    deleteMany: async (args: {
+      where: { articleId: string };
+    }): Promise<{ count: number }> => {
+      const before = this.knowledgeChunks.length;
+      this.knowledgeChunks.splice(
+        0,
+        this.knowledgeChunks.length,
+        ...this.knowledgeChunks.filter(
+          (chunk) => chunk.articleId !== args.where.articleId,
+        ),
+      );
+      return { count: before - this.knowledgeChunks.length };
+    },
+    createMany: async (args: {
+      data: Array<{
+        articleId: string;
+        chunkIndex: number;
+        content: string;
+        tokensEstimate?: number | null;
+        embeddingJson?: Prisma.JsonValue | null;
+      }>;
+    }): Promise<{ count: number }> => {
+      const now = new Date();
+      for (const chunk of args.data) {
+        this.knowledgeChunks.push({
+          id: randomUUID(),
+          articleId: chunk.articleId,
+          chunkIndex: chunk.chunkIndex,
+          content: chunk.content,
+          tokensEstimate: chunk.tokensEstimate ?? null,
+          embeddingJson: (chunk.embeddingJson as Prisma.JsonValue) ?? null,
+          createdAt: now,
+        });
+      }
+      return { count: args.data.length };
     },
   };
 
@@ -790,6 +1089,310 @@ describe('OpsPilot API Phase 3 (e2e)', () => {
       (entry) => entry.action === 'ticket_ai_analysis_failed',
     );
     expect(failureLogs.length).toBeGreaterThan(0);
+  });
+
+  it('USER cannot create knowledge article', async () => {
+    const user = await register('kb.user.denied@company.com', 'KB User');
+
+    await request(app.getHttpServer())
+      .post('/api/knowledge-base/articles')
+      .set('Authorization', `Bearer ${user.accessToken}`)
+      .send({
+        title: 'User should not create article',
+        content: 'Draft policy content.',
+        category: 'HR',
+      })
+      .expect(403);
+  });
+
+  it('SUPPORT_AGENT can create, update, publish, archive and rechunk article', async () => {
+    const support = await register('kb.agent@company.com', 'KB Agent');
+    setRole(support.user.email, Role.SUPPORT_AGENT);
+    const supportLogin = await login('kb.agent@company.com');
+
+    const created = await request(app.getHttpServer())
+      .post('/api/knowledge-base/articles')
+      .set('Authorization', `Bearer ${supportLogin.accessToken}`)
+      .send({
+        title: 'IT access troubleshooting',
+        content:
+          'If dashboard access is blocked, verify account lock, reset SSO, and collect VPN logs.',
+        category: 'IT',
+      })
+      .expect(201);
+
+    expect(created.body.status).toBe('DRAFT');
+    expect(created.body.chunksCount).toBeGreaterThan(0);
+
+    const updated = await request(app.getHttpServer())
+      .patch(`/api/knowledge-base/articles/${created.body.id as string}`)
+      .set('Authorization', `Bearer ${supportLogin.accessToken}`)
+      .send({
+        content:
+          'If dashboard access is blocked, verify account lock, reset SSO, and collect VPN logs. Escalate if still blocked.',
+      })
+      .expect(200);
+
+    expect(updated.body.content).toContain('Escalate if still blocked');
+
+    const published = await request(app.getHttpServer())
+      .post(`/api/knowledge-base/articles/${created.body.id as string}/publish`)
+      .set('Authorization', `Bearer ${supportLogin.accessToken}`)
+      .expect(201);
+
+    expect(published.body.status).toBe('PUBLISHED');
+
+    const rechunked = await request(app.getHttpServer())
+      .post(`/api/knowledge-base/articles/${created.body.id as string}/rechunk`)
+      .set('Authorization', `Bearer ${supportLogin.accessToken}`)
+      .expect(201);
+
+    expect(rechunked.body.chunksCount).toBeGreaterThan(0);
+
+    const archived = await request(app.getHttpServer())
+      .post(`/api/knowledge-base/articles/${created.body.id as string}/archive`)
+      .set('Authorization', `Bearer ${supportLogin.accessToken}`)
+      .expect(201);
+
+    expect(archived.body.status).toBe('ARCHIVED');
+  });
+
+  it('ADMIN can create knowledge article', async () => {
+    const admin = await register('kb.admin@company.com', 'KB Admin');
+    setRole(admin.user.email, Role.ADMIN);
+    const adminLogin = await login('kb.admin@company.com');
+
+    await request(app.getHttpServer())
+      .post('/api/knowledge-base/articles')
+      .set('Authorization', `Bearer ${adminLogin.accessToken}`)
+      .send({
+        title: 'Finance expense reimbursement policy',
+        content: 'Submit receipts within 10 business days for reimbursement.',
+        category: 'FINANCE',
+      })
+      .expect(201);
+  });
+
+  it('USER cannot update/publish/archive knowledge article', async () => {
+    const support = await register('kb.owner.agent@company.com', 'KB Owner');
+    setRole(support.user.email, Role.SUPPORT_AGENT);
+    const supportLogin = await login('kb.owner.agent@company.com');
+    const user = await register('kb.regular@company.com', 'KB Regular User');
+
+    const created = await request(app.getHttpServer())
+      .post('/api/knowledge-base/articles')
+      .set('Authorization', `Bearer ${supportLogin.accessToken}`)
+      .send({
+        title: 'Operations schedule change process',
+        content: 'Submit changes 24h before handoff and notify stakeholders.',
+        category: 'OPERATIONS',
+      })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .patch(`/api/knowledge-base/articles/${created.body.id as string}`)
+      .set('Authorization', `Bearer ${user.accessToken}`)
+      .send({ title: 'Malicious update attempt' })
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .post(`/api/knowledge-base/articles/${created.body.id as string}/publish`)
+      .set('Authorization', `Bearer ${user.accessToken}`)
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .post(`/api/knowledge-base/articles/${created.body.id as string}/archive`)
+      .set('Authorization', `Bearer ${user.accessToken}`)
+      .expect(403);
+  });
+
+  it('search returns relevant published chunks and excludes drafts for USER', async () => {
+    const support = await register(
+      'kb.search.agent@company.com',
+      'KB Search Agent',
+    );
+    setRole(support.user.email, Role.SUPPORT_AGENT);
+    const supportLogin = await login('kb.search.agent@company.com');
+    const user = await register('kb.search.user@company.com', 'KB Search User');
+
+    const published = await request(app.getHttpServer())
+      .post('/api/knowledge-base/articles')
+      .set('Authorization', `Bearer ${supportLogin.accessToken}`)
+      .send({
+        title: 'IT access issue troubleshooting',
+        content:
+          'When dashboard login fails, check access lock, reset credentials, and validate VPN connection.',
+        category: 'IT',
+      })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post(
+        `/api/knowledge-base/articles/${published.body.id as string}/publish`,
+      )
+      .set('Authorization', `Bearer ${supportLogin.accessToken}`)
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post('/api/knowledge-base/articles')
+      .set('Authorization', `Bearer ${supportLogin.accessToken}`)
+      .send({
+        title: 'Draft IT fallback notes',
+        content: 'Draft-only internal note about test credentials.',
+        category: 'IT',
+      })
+      .expect(201);
+
+    const userSearch = await request(app.getHttpServer())
+      .get('/api/knowledge-base/search')
+      .set('Authorization', `Bearer ${user.accessToken}`)
+      .query({ query: 'dashboard login blocked', category: 'IT', limit: 2 })
+      .expect(200);
+
+    expect(Array.isArray(userSearch.body)).toBe(true);
+    expect(userSearch.body.length).toBeGreaterThan(0);
+    expect(
+      userSearch.body.every(
+        (row: { status: KnowledgeArticleStatus; category: TicketCategory }) =>
+          row.status === 'PUBLISHED' && row.category === 'IT',
+      ),
+    ).toBe(true);
+
+    const supportSearch = await request(app.getHttpServer())
+      .get('/api/knowledge-base/search')
+      .set('Authorization', `Bearer ${supportLogin.accessToken}`)
+      .query({
+        query: 'test credentials',
+        category: 'IT',
+        includeNonPublished: true,
+        limit: 5,
+      })
+      .expect(200);
+
+    expect(
+      supportSearch.body.some(
+        (row: { articleTitle: string }) =>
+          row.articleTitle === 'Draft IT fallback notes',
+      ),
+    ).toBe(true);
+  });
+
+  it('list articles applies pagination and role visibility', async () => {
+    const support = await register(
+      'kb.list.agent@company.com',
+      'KB List Agent',
+    );
+    setRole(support.user.email, Role.SUPPORT_AGENT);
+    const supportLogin = await login('kb.list.agent@company.com');
+    const user = await register('kb.list.user@company.com', 'KB List User');
+
+    const draft = await request(app.getHttpServer())
+      .post('/api/knowledge-base/articles')
+      .set('Authorization', `Bearer ${supportLogin.accessToken}`)
+      .send({
+        title: 'Customer escalation draft',
+        content: 'Draft handling guide.',
+        category: 'CUSTOMER_SUPPORT',
+      })
+      .expect(201);
+
+    const published = await request(app.getHttpServer())
+      .post('/api/knowledge-base/articles')
+      .set('Authorization', `Bearer ${supportLogin.accessToken}`)
+      .send({
+        title: 'Published customer escalation policy',
+        content: 'Published handling guide.',
+        category: 'CUSTOMER_SUPPORT',
+      })
+      .expect(201);
+    await request(app.getHttpServer())
+      .post(
+        `/api/knowledge-base/articles/${published.body.id as string}/publish`,
+      )
+      .set('Authorization', `Bearer ${supportLogin.accessToken}`)
+      .expect(201);
+
+    const userList = await request(app.getHttpServer())
+      .get('/api/knowledge-base/articles')
+      .set('Authorization', `Bearer ${user.accessToken}`)
+      .query({ limit: 1, page: 1, category: 'CUSTOMER_SUPPORT' })
+      .expect(200);
+    const userListBody = userList.body as KnowledgeListResponse;
+    expect(userListBody.meta.limit).toBe(1);
+    expect(
+      userListBody.data.every(
+        (row) => row.status === KnowledgeArticleStatus.PUBLISHED,
+      ),
+    ).toBe(true);
+
+    const supportList = await request(app.getHttpServer())
+      .get('/api/knowledge-base/articles')
+      .set('Authorization', `Bearer ${supportLogin.accessToken}`)
+      .query({
+        includeNonPublished: true,
+        category: 'CUSTOMER_SUPPORT',
+        search: 'escalation',
+      })
+      .expect(200);
+    const supportRows = (supportList.body as KnowledgeListResponse).data;
+    expect(
+      supportRows.some(
+        (row) => row.id === draft.body.id && row.status === 'DRAFT',
+      ),
+    ).toBe(true);
+  });
+
+  it('ticket AI analysis retrieves KB context and writes context audit event', async () => {
+    const support = await register('kb.ai.agent@company.com', 'KB AI Agent');
+    setRole(support.user.email, Role.SUPPORT_AGENT);
+    const supportLogin = await login('kb.ai.agent@company.com');
+    const user = await register('kb.ai.user@company.com', 'KB AI User');
+
+    const article = await request(app.getHttpServer())
+      .post('/api/knowledge-base/articles')
+      .set('Authorization', `Bearer ${supportLogin.accessToken}`)
+      .send({
+        title: 'IT dashboard access troubleshooting',
+        content:
+          'If users are blocked from dashboard login, verify account state, reset SSO session, and collect network diagnostics.',
+        category: 'IT',
+      })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post(`/api/knowledge-base/articles/${article.body.id as string}/publish`)
+      .set('Authorization', `Bearer ${supportLogin.accessToken}`)
+      .expect(201);
+
+    const ticket = await createTicket(user.accessToken, {
+      title: 'Cannot access dashboard',
+      description:
+        'Login is blocked and I need urgent access to production tools.',
+      category: 'IT',
+      priority: 'MEDIUM',
+    });
+
+    const analysis = await request(app.getHttpServer())
+      .post(`/api/tickets/${ticket.body.id as string}/ai/analyze`)
+      .set('Authorization', `Bearer ${user.accessToken}`)
+      .expect(201);
+
+    expect(analysis.body.aiSummary).toBeTruthy();
+    expect(analysis.body.aiConfidence).toBeGreaterThan(0);
+    expect(analysis.body.recommendedAction).toContain('knowledge base context');
+    expect(Array.isArray(analysis.body.contextSources)).toBe(true);
+    expect(analysis.body.contextSources.length).toBeGreaterThan(0);
+
+    const suggestion = await request(app.getHttpServer())
+      .get(`/api/tickets/${ticket.body.id as string}/ai/suggestion`)
+      .set('Authorization', `Bearer ${user.accessToken}`)
+      .expect(200);
+    expect(Array.isArray(suggestion.body.contextSources)).toBe(true);
+
+    const contextLogs = mockPrisma.auditLogs.filter(
+      (entry) => entry.action === 'ticket_ai_context_retrieved',
+    );
+    expect(contextLogs.length).toBeGreaterThan(0);
   });
 
   async function register(

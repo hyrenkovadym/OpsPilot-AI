@@ -42,6 +42,7 @@ export default function LoginPage() {
           <input
             type="email"
             name="email"
+            data-testid="login-email"
             value={email}
             onChange={(event) => setEmail(event.target.value)}
             placeholder="you@company.com"
@@ -53,13 +54,19 @@ export default function LoginPage() {
           <input
             type="password"
             name="password"
+            data-testid="login-password"
             value={password}
             onChange={(event) => setPassword(event.target.value)}
             placeholder="Enter your password"
             required
           />
         </label>
-        <button type="submit" className="btn" disabled={submitting}>
+        <button
+          type="submit"
+          className="btn"
+          data-testid="login-submit"
+          disabled={submitting}
+        >
           {submitting ? 'Signing in...' : 'Sign In'}
         </button>
       </form>

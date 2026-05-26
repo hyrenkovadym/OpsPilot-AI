@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import type {
+  AiContextChunk,
   AiProviderName,
   AiTicketAnalysis,
   AiTicketInput,
@@ -10,8 +11,13 @@ import { AiProviderFactory } from './ai-provider.factory';
 export class AiService {
   constructor(private readonly aiProviderFactory: AiProviderFactory) {}
 
-  async analyzeTicket(ticket: AiTicketInput): Promise<AiTicketAnalysis> {
-    return this.aiProviderFactory.getProvider().analyzeTicket(ticket);
+  async analyzeTicket(
+    ticket: AiTicketInput,
+    contextChunks?: AiContextChunk[],
+  ): Promise<AiTicketAnalysis> {
+    return this.aiProviderFactory
+      .getProvider()
+      .analyzeTicket(ticket, contextChunks);
   }
 
   getProviderName(): AiProviderName {

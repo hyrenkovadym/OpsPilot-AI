@@ -54,10 +54,17 @@ export interface TicketDetail {
   aiSummary: string | null;
   aiConfidence: number | null;
   aiRecommendedAction: string | null;
+  aiContextSourcesJson: AiContextSource[] | null;
   createdAt: string;
   updatedAt: string;
   createdBy: TicketUserSummary;
   assignedTo: TicketUserSummary | null;
+}
+
+export interface AiContextSource {
+  articleId: string;
+  title: string;
+  score: number;
 }
 
 export interface TicketAiSuggestion {
@@ -67,6 +74,7 @@ export interface TicketAiSuggestion {
   aiConfidence: number;
   recommendedAction: string;
   provider: 'mock' | 'openai';
+  contextSources?: AiContextSource[] | null;
 }
 
 export interface TicketsListResponse {
@@ -90,6 +98,56 @@ export interface TicketsQuery {
   limit?: number;
 }
 
+export type KnowledgeArticleStatus = 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
+
+export interface KnowledgeArticle {
+  id: string;
+  title: string;
+  content: string;
+  category: TicketCategory;
+  status: KnowledgeArticleStatus;
+  createdById: string;
+  updatedById: string | null;
+  createdAt: string;
+  updatedAt: string;
+  chunksCount: number;
+}
+
+export interface KnowledgeArticlesListResponse {
+  data: KnowledgeArticle[];
+  meta: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+}
+
+export interface KnowledgeArticlesQuery {
+  category?: TicketCategory;
+  status?: KnowledgeArticleStatus;
+  search?: string;
+  includeNonPublished?: boolean;
+  page?: number;
+  limit?: number;
+}
+
+export interface KnowledgeSearchResult {
+  articleId: string;
+  articleTitle: string;
+  category: TicketCategory;
+  status: KnowledgeArticleStatus;
+  chunkContent: string;
+  score: number;
+}
+
+export interface KnowledgeSearchQuery {
+  query?: string;
+  category?: TicketCategory;
+  includeNonPublished?: boolean;
+  limit?: number;
+}
+
 export class ApiError extends Error {
   status: number;
   details: unknown;
@@ -110,7 +168,9 @@ function buildQueryString(query?: Record<string, unknown>): string {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(query)) {
     if (
-      (typeof value === 'string' || typeof value === 'number') &&
+      (typeof value === 'string' ||
+        typeof value === 'number' ||
+        typeof value === 'boolean') &&
       `${value}`.trim().length > 0
     ) {
       params.set(key, `${value}`);
@@ -299,6 +359,134 @@ export async function getTicketAiSuggestion(
 ): Promise<TicketAiSuggestion> {
   return requestJson<TicketAiSuggestion>(
     `/tickets/${id}/ai/suggestion`,
+    {
+      method: 'GET',
+    },
+    token,
+  );
+}
+
+export async function listKnowledgeArticles(
+  token: string,
+  query?: KnowledgeArticlesQuery,
+): Promise<KnowledgeArticlesListResponse> {
+  const queryString = buildQueryString(
+    query as Record<string, unknown> | undefined,
+  );
+  return requestJson<KnowledgeArticlesListResponse>(
+    `/knowledge-base/articles${queryString}`,
+    { method: 'GET' },
+    token,
+  );
+}
+
+export async function getKnowledgeArticle(
+  token: string,
+  id: string,
+): Promise<KnowledgeArticle> {
+  return requestJson<KnowledgeArticle>(
+    `/knowledge-base/articles/${id}`,
+    { method: 'GET' },
+    token,
+  );
+}
+
+export async function createKnowledgeArticle(
+  token: string,
+  payload: {
+    title: string;
+    content: string;
+    category: TicketCategory;
+  },
+): Promise<KnowledgeArticle> {
+  return requestJson<KnowledgeArticle>(
+    '/knowledge-base/articles',
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+    token,
+  );
+}
+
+export async function updateKnowledgeArticle(
+  token: string,
+  id: string,
+  payload: {
+    title?: string;
+    content?: string;
+    category?: TicketCategory;
+  },
+): Promise<KnowledgeArticle> {
+  return requestJson<KnowledgeArticle>(
+    `/knowledge-base/articles/${id}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    },
+    token,
+  );
+}
+
+export async function deleteKnowledgeArticle(
+  token: string,
+  id: string,
+): Promise<void> {
+  await requestJson<null>(
+    `/knowledge-base/articles/${id}`,
+    {
+      method: 'DELETE',
+    },
+    token,
+  );
+}
+
+export async function publishKnowledgeArticle(
+  token: string,
+  id: string,
+): Promise<KnowledgeArticle> {
+  return requestJson<KnowledgeArticle>(
+    `/knowledge-base/articles/${id}/publish`,
+    {
+      method: 'POST',
+    },
+    token,
+  );
+}
+
+export async function archiveKnowledgeArticle(
+  token: string,
+  id: string,
+): Promise<KnowledgeArticle> {
+  return requestJson<KnowledgeArticle>(
+    `/knowledge-base/articles/${id}/archive`,
+    {
+      method: 'POST',
+    },
+    token,
+  );
+}
+
+export async function rechunkKnowledgeArticle(
+  token: string,
+  id: string,
+): Promise<KnowledgeArticle> {
+  return requestJson<KnowledgeArticle>(
+    `/knowledge-base/articles/${id}/rechunk`,
+    {
+      method: 'POST',
+    },
+    token,
+  );
+}
+
+export async function searchKnowledgeBase(
+  token: string,
+  query: KnowledgeSearchQuery,
+): Promise<KnowledgeSearchResult[]> {
+  const queryString = buildQueryString(query as Record<string, unknown>);
+  return requestJson<KnowledgeSearchResult[]>(
+    `/knowledge-base/search${queryString}`,
     {
       method: 'GET',
     },

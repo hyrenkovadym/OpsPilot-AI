@@ -126,6 +126,7 @@ export default function TicketDetailsPage() {
               aiSummary: analysis.aiSummary,
               aiConfidence: analysis.aiConfidence,
               aiRecommendedAction: analysis.recommendedAction,
+              aiContextSourcesJson: analysis.contextSources ?? null,
             }
           : prev,
       );
@@ -161,6 +162,7 @@ export default function TicketDetailsPage() {
               aiSummary: suggestion.aiSummary,
               aiConfidence: suggestion.aiConfidence,
               aiRecommendedAction: suggestion.recommendedAction,
+              aiContextSourcesJson: suggestion.contextSources ?? null,
             }
           : prev,
       );
@@ -190,7 +192,7 @@ export default function TicketDetailsPage() {
       {!loading && ticket ? (
         <div className="info-list">
           <article className="info-item">
-            <h3>{ticket.title}</h3>
+            <h3 data-testid="ticket-detail-title">{ticket.title}</h3>
             <p className="helper-text">{ticket.description}</p>
           </article>
           <article className="info-item">
@@ -219,22 +221,36 @@ export default function TicketDetailsPage() {
             <p>
               <strong>Updated:</strong> {new Date(ticket.updatedAt).toLocaleString()}
             </p>
-            <p>
+            <p data-testid="ai-summary">
               <strong>AI Summary:</strong>{' '}
               {ticket.aiSummary ?? 'No AI summary available yet.'}
             </p>
-            <p>
+            <p data-testid="ai-confidence">
               <strong>AI Confidence:</strong>{' '}
               {ticket.aiConfidence !== null
                 ? `${Math.round(ticket.aiConfidence * 100)}%`
                 : 'Not available'}
             </p>
-            <p>
+            <p data-testid="ai-recommended-action">
               <strong>Recommended Action:</strong>{' '}
               {ticket.aiRecommendedAction ?? 'Run AI analysis to generate a suggestion.'}
             </p>
+            <div>
+              <strong>AI Context Sources:</strong>{' '}
+              {ticket.aiContextSourcesJson && ticket.aiContextSourcesJson.length > 0 ? (
+                <ul>
+                  {ticket.aiContextSourcesJson.map((source) => (
+                    <li key={`${source.articleId}-${source.title}`}>
+                      {source.title} (score: {source.score})
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <span>No knowledge context found for this ticket.</span>
+              )}
+            </div>
             {ticket.aiConfidence !== null && ticket.aiConfidence < 0.6 ? (
-              <p className="warning">
+              <p className="warning" data-testid="ai-low-confidence-warning">
                 AI confidence is low. Please review this recommendation manually.
               </p>
             ) : null}
@@ -276,6 +292,7 @@ export default function TicketDetailsPage() {
               <button
                 type="button"
                 className="btn subtle-btn"
+                data-testid="run-ai-analysis-button"
                 disabled={aiLoading}
                 onClick={() => void runAiAnalysis()}
               >

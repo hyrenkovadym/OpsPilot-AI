@@ -19,8 +19,19 @@ export interface AiTicketAnalysis {
   recommendedAction: string;
 }
 
+export interface AiContextChunk {
+  articleId: string;
+  articleTitle: string;
+  category: TicketCategory;
+  chunkContent: string;
+  score: number;
+}
+
 export interface AiProvider {
   readonly name: AiProviderName;
-  analyzeTicket(ticket: AiTicketInput): Promise<AiTicketAnalysis>;
+  analyzeTicket(
+    ticket: AiTicketInput,
+    contextChunks?: AiContextChunk[],
+  ): Promise<AiTicketAnalysis>;
   assertConfiguration?(): void;
 }

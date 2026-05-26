@@ -10,6 +10,9 @@ dist/
 coverage/
 .next/
 logs/
+playwright-report/
+apps/web/playwright-report/
+apps/web/test-results/
 
 # Environment
 .env

@@ -3,6 +3,7 @@ export const primaryNavigation = [
   { href: '/dashboard', label: 'Dashboard' },
   { href: '/tickets', label: 'Tickets' },
   { href: '/tickets/new', label: 'New Ticket' },
+  { href: '/knowledge-base', label: 'Knowledge Base' },
 ];
 
 export const authNavigation = [

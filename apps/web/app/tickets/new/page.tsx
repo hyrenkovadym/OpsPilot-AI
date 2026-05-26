@@ -62,6 +62,7 @@ export default function NewTicketPage() {
           <input
             type="text"
             name="title"
+            data-testid="ticket-title-input"
             value={title}
             onChange={(event) => setTitle(event.target.value)}
             placeholder="Need access to quarterly reporting dashboard"
@@ -73,6 +74,7 @@ export default function NewTicketPage() {
           Description
           <textarea
             name="description"
+            data-testid="ticket-description-input"
             rows={5}
             value={description}
             onChange={(event) => setDescription(event.target.value)}
@@ -85,6 +87,7 @@ export default function NewTicketPage() {
           Category
           <select
             name="category"
+            data-testid="ticket-category-select"
             value={category}
             onChange={(event) => setCategory(event.target.value as TicketCategory)}
           >
@@ -100,6 +103,7 @@ export default function NewTicketPage() {
           Priority
           <select
             name="priority"
+            data-testid="ticket-priority-select"
             value={priority}
             onChange={(event) => setPriority(event.target.value as TicketPriority)}
           >
@@ -108,7 +112,12 @@ export default function NewTicketPage() {
             <option value="HIGH">HIGH</option>
           </select>
         </label>
-        <button type="submit" className="btn" disabled={submitting}>
+        <button
+          type="submit"
+          className="btn"
+          data-testid="create-ticket-submit"
+          disabled={submitting}
+        >
           {submitting ? 'Submitting...' : 'Submit Ticket'}
         </button>
       </form>

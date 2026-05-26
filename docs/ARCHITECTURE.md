@@ -1,99 +1,107 @@
-# OpsPilot AI Architecture
+# OpsPilot AI Architecture (Phase 4)
 
 ## Monorepo
 - `apps/api`: NestJS backend
 - `apps/web`: Next.js frontend
-- `infra`: Docker Compose runtime
-- `docs`: architecture, API, roadmap
+- `infra`: Docker Compose
+- `docs`: architecture/API/roadmap/RAG notes
 
-## API Modules
-- `config`: env loading and validation
-- `prisma`: database access layer
+## Backend Modules
+- `config`: env loading + validation
+- `prisma`: database layer
 - `auth`: register/login/me with JWT
-- `users`: user persistence helpers
-- `tickets`: lifecycle workflow + AI endpoints
-- `ai`: provider abstraction and output validation
-- `audit`: centralized event logging
+- `users`: user access helpers
+- `tickets`: ticket lifecycle + AI endpoints
+- `ai`: provider abstraction (`mock`, optional `openai`)
+- `knowledge-base`: article CRUD, chunking, retrieval
+- `audit`: centralized audit log service
 - `health`: health/readiness
-- `common`: guards, decorators, shared auth types
+- `common`: guards, decorators, auth types
 
-## Security and Access
-1. JWT auth via `JwtAuthGuard`
-2. Role policy via `RolesGuard` and `@Roles(...)`
-3. Record-level ticket visibility checks:
-   - `USER`: own tickets only
-   - `SUPPORT_AGENT`/`ADMIN`: queue-wide visibility
-4. Audited lifecycle and AI events
+## Data Layer
 
-## Data Model
-Core entities:
+Core models:
 - `User`
 - `RefreshToken`
 - `Ticket`
 - `AuditLog`
 
-Ticket includes AI support fields:
-- `aiSummary` (nullable)
-- `aiConfidence` (nullable)
-- `aiRecommendedAction` (nullable)
+Knowledge models:
+- `KnowledgeBaseArticle`
+- `KnowledgeBaseChunk`
 
-## AI Provider Abstraction (Phase 3)
+Ticket AI fields:
+- `aiSummary`
+- `aiConfidence`
+- `aiRecommendedAction`
+- `aiContextSourcesJson`
 
-Location: `apps/api/src/ai`
+## Auth and RBAC
+1. `JwtAuthGuard` validates access tokens
+2. `RolesGuard` enforces role-based policies
+3. Service-level record checks enforce resource ownership rules
 
-### Contracts
-- `AiProvider` interface defines `analyzeTicket(...)`.
-- Output must satisfy schema:
-  - `category` (`TicketCategory`)
-  - `priority` (`TicketPriority`)
-  - `aiSummary` (string)
-  - `aiConfidence` (0..1)
-  - `recommendedAction` (string)
+Role highlights:
+- `USER`: own tickets, published KB visibility
+- `SUPPORT_AGENT`: queue ops + KB management
+- `ADMIN`: full platform access
 
-### Providers
-- `MockAiProvider`:
-  - deterministic keyword-based classification/priority logic
-  - default provider for local and test runs
-  - no network calls
-- `OpenAiCompatibleProvider`:
-  - optional mode via `AI_PROVIDER=openai`
-  - configurable API base URL/model/timeout/retries
-  - strict JSON parsing + schema validation
-  - safe error messages (no secret leakage)
+## Knowledge Base Lifecycle
+Statuses:
+- `DRAFT`
+- `PUBLISHED`
+- `ARCHIVED`
 
-### Factory and Service
-- `AiProviderFactory` resolves provider from environment
-- `AiService` exposes analysis entrypoint to ticket workflow
+Lifecycle behavior:
+- create article as `DRAFT`
+- publish/article update triggers chunk lifecycle
+- archive retains article but excludes it from retrieval context
+- only `PUBLISHED` content is used in ticket AI retrieval
 
-Default mode: `AI_PROVIDER=mock`
+## Chunking Strategy
+- Lightweight deterministic chunking by paragraph + size boundary
+- default chunk target around 800 chars
+- chunk order stored by `chunkIndex`
+- rough token estimate stored for each chunk
 
-## Ticket + AI Workflow
-1. Ticket is created/managed via existing lifecycle endpoints.
-2. User/agent/admin triggers `POST /tickets/:id/ai/analyze`.
-3. Service runs provider analysis and validates output.
-4. Ticket is updated with AI fields and adjusted category/priority.
-5. Audit event `ticket_ai_analyzed` is written.
-6. On failure, safe error path writes `ticket_ai_analysis_failed`.
+## Retrieval Strategy (Simple RAG-like)
+`RetrievalService` uses deterministic scoring:
+- keyword overlap in chunk content
+- title boost
+- article content match
+- category boost
 
-Suggestion endpoint:
-- `GET /tickets/:id/ai/suggestion`
-- returns stored analysis when available, or computes suggestion on demand.
+Top chunks are returned with score and source metadata.
 
-## Frontend Integration
-- `apps/web/lib/api.ts` adds:
-  - `analyzeTicket(ticketId)`
-  - `getTicketAiSuggestion(ticketId)`
-- `/tickets/[id]` adds:
-  - Run AI analysis action
-  - AI summary/confidence/recommended action display
-  - low-confidence warning (`aiConfidence < 0.6`)
-- `/tickets` list shows AI confidence column
+No external embedding/vector dependency yet; JSON embedding placeholders are kept for future migration.
 
-## Reliability and Safety
-- App stays runnable without API keys
-- Tests use mock mode and mocked fetch for openai-specific tests
-- AI output validation prevents invalid persistence
-- provider failures are handled without crashing process
+## AI Integration Flow
+1. Ticket AI analyze endpoint loads ticket
+2. Retrieval fetches top published KB chunks for ticket context
+3. Provider receives ticket + optional context chunks
+4. Output is schema-validated
+5. Ticket AI fields and context sources are persisted
+6. Audit events capture retrieval/analyze/failure paths
 
-## Next Phase
-Phase 4 targets knowledge base and simple RAG on top of this provider abstraction.
+Provider behavior:
+- `MockAiProvider` default: deterministic, local/test safe
+- `OpenAiCompatibleProvider` optional: structured JSON output, retries, timeout, safe error handling
+
+## Frontend Architecture
+- API access centralized in `apps/web/lib/api.ts`
+- Ticket UI:
+  - list/new/detail pages
+  - AI analyze action and context display
+- Knowledge Base UI:
+  - `/knowledge-base`
+  - `/knowledge-base/new`
+  - `/knowledge-base/[id]`
+
+## Security and Reliability
+- `AI_PROVIDER=mock` by default; no key required
+- tests never require real OpenAI or network for AI validation paths
+- API keys never logged or returned in error payloads
+- audit metadata stores safe operational context only
+
+## Forward Path
+Next planned upgrade is async orchestration with BullMQ (Phase 5), then real-time delivery with WebSockets (Phase 6).

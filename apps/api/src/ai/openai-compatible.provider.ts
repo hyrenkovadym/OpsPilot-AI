@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type {
+  AiContextChunk,
   AiProvider,
   AiTicketAnalysis,
   AiTicketInput,
@@ -48,7 +49,10 @@ export class OpenAiCompatibleProvider implements AiProvider {
     }
   }
 
-  async analyzeTicket(ticket: AiTicketInput): Promise<AiTicketAnalysis> {
+  async analyzeTicket(
+    ticket: AiTicketInput,
+    contextChunks: AiContextChunk[] = [],
+  ): Promise<AiTicketAnalysis> {
     this.assertConfiguration();
 
     const payload = {
@@ -64,7 +68,7 @@ export class OpenAiCompatibleProvider implements AiProvider {
         },
         {
           role: 'user',
-          content: this.buildPrompt(ticket),
+          content: this.buildPrompt(ticket, contextChunks),
         },
       ],
       temperature: 0.1,
@@ -144,19 +148,39 @@ export class OpenAiCompatibleProvider implements AiProvider {
     throw lastError ?? new Error('OpenAI-compatible request failed');
   }
 
-  private buildPrompt(ticket: AiTicketInput): string {
+  private buildPrompt(
+    ticket: AiTicketInput,
+    contextChunks: AiContextChunk[],
+  ): string {
+    const contextBlock =
+      contextChunks.length === 0
+        ? 'No knowledge base context provided.'
+        : contextChunks
+            .slice(0, 5)
+            .map(
+              (chunk, index) =>
+                `[${index + 1}] Article: ${chunk.articleTitle} | Category: ${chunk.category} | Score: ${chunk.score}\n${chunk.chunkContent}`,
+            )
+            .join('\n\n');
+
     return [
       'Analyze this internal support ticket and return strict JSON with keys:',
       'category, priority, aiSummary, aiConfidence, recommendedAction.',
       'Allowed category: HR, IT, FINANCE, OPERATIONS, CUSTOMER_SUPPORT, OTHER.',
       'Allowed priority: LOW, MEDIUM, HIGH.',
       'aiConfidence must be a number between 0 and 1.',
+      'Use provided knowledge context only when relevant.',
+      'Do not invent policy details that are not in provided context.',
+      'If context is insufficient, provide a cautious recommendedAction.',
       '',
       `Title: ${ticket.title}`,
       `Description: ${ticket.description}`,
       `Current category: ${ticket.category}`,
       `Current priority: ${ticket.priority}`,
       `Current status: ${ticket.status}`,
+      '',
+      'Knowledge context:',
+      contextBlock,
     ].join('\n');
   }
 }

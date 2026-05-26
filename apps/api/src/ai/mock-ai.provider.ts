@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { TicketCategory, TicketPriority } from '@prisma/client';
 import type {
+  AiContextChunk,
   AiProvider,
   AiTicketAnalysis,
   AiTicketInput,
@@ -11,12 +12,23 @@ import { validateAiTicketAnalysis } from './schemas/ai-ticket-analysis.schema';
 export class MockAiProvider implements AiProvider {
   readonly name = 'mock' as const;
 
-  analyzeTicket(ticket: AiTicketInput): Promise<AiTicketAnalysis> {
+  analyzeTicket(
+    ticket: AiTicketInput,
+    contextChunks: AiContextChunk[] = [],
+  ): Promise<AiTicketAnalysis> {
     const source = `${ticket.title} ${ticket.description}`.toLowerCase();
     const category = this.resolveCategory(source);
     const priority = this.resolvePriority(source);
-    const aiSummary = this.createSummary(ticket.title, ticket.description);
-    const recommendedAction = this.resolveRecommendedAction(category, priority);
+    const aiSummary = this.createSummary(
+      ticket.title,
+      ticket.description,
+      contextChunks,
+    );
+    const recommendedAction = this.resolveRecommendedAction(
+      category,
+      priority,
+      contextChunks,
+    );
     const aiConfidence = this.resolveConfidence(category, priority);
 
     return Promise.resolve(
@@ -111,33 +123,39 @@ export class MockAiProvider implements AiProvider {
   private resolveRecommendedAction(
     category: TicketCategory,
     priority: TicketPriority,
+    contextChunks: AiContextChunk[],
   ): string {
     const urgencyPrefix =
       priority === TicketPriority.HIGH
         ? 'Escalate to on-call support and start triage immediately.'
         : 'Create a standard support follow-up and track progress in the queue.';
 
+    const contextHint =
+      contextChunks.length > 0
+        ? ` Use knowledge base context from "${contextChunks[0].articleTitle}" when applying the steps.`
+        : '';
+
     if (category === TicketCategory.IT) {
-      return `${urgencyPrefix} Verify account/device/network diagnostics and update the ticket with findings.`;
+      return `${urgencyPrefix} Verify account/device/network diagnostics and update the ticket with findings.${contextHint}`;
     }
 
     if (category === TicketCategory.FINANCE) {
-      return `${urgencyPrefix} Validate transaction records and coordinate with finance operations for resolution details.`;
+      return `${urgencyPrefix} Validate transaction records and coordinate with finance operations for resolution details.${contextHint}`;
     }
 
     if (category === TicketCategory.HR) {
-      return `${urgencyPrefix} Review HR policy context and route to the HR operations owner.`;
+      return `${urgencyPrefix} Review HR policy context and route to the HR operations owner.${contextHint}`;
     }
 
     if (category === TicketCategory.CUSTOMER_SUPPORT) {
-      return `${urgencyPrefix} Assign a customer support specialist and confirm customer communication timeline.`;
+      return `${urgencyPrefix} Assign a customer support specialist and confirm customer communication timeline.${contextHint}`;
     }
 
     if (category === TicketCategory.OPERATIONS) {
-      return `${urgencyPrefix} Review process ownership and confirm next operational checkpoint.`;
+      return `${urgencyPrefix} Review process ownership and confirm next operational checkpoint.${contextHint}`;
     }
 
-    return `${urgencyPrefix} Gather additional context before reclassifying the ticket.`;
+    return `${urgencyPrefix} Gather additional context before reclassifying the ticket.${contextHint}`;
   }
 
   private resolveConfidence(
@@ -149,11 +167,20 @@ export class MockAiProvider implements AiProvider {
     return Math.min(0.97, Number((categoryScore + priorityBonus).toFixed(2)));
   }
 
-  private createSummary(title: string, description: string): string {
-    const normalized = `${title.trim()}: ${description.trim()}`.replace(
-      /\s+/g,
-      ' ',
-    );
+  private createSummary(
+    title: string,
+    description: string,
+    contextChunks: AiContextChunk[],
+  ): string {
+    const contextSnippet =
+      contextChunks.length > 0
+        ? ` Context source: ${contextChunks[0].articleTitle}.`
+        : '';
+    const normalized =
+      `${title.trim()}: ${description.trim()}${contextSnippet}`.replace(
+        /\s+/g,
+        ' ',
+      );
     if (normalized.length <= 180) {
       return normalized;
     }

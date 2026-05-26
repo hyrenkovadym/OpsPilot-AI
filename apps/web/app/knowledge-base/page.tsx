@@ -6,61 +6,60 @@ import { PageSection } from '@/components/page-section';
 import {
   ApiError,
   getAccessToken,
-  listTickets,
-  type TicketPriority,
-  type TicketStatus,
-  type TicketsListResponse,
+  listKnowledgeArticles,
+  type KnowledgeArticle,
+  type KnowledgeArticleStatus,
+  type TicketCategory,
 } from '@/lib/api';
 
 interface FilterState {
   search: string;
-  status: '' | TicketStatus;
-  priority: '' | TicketPriority;
+  category: '' | TicketCategory;
+  status: '' | KnowledgeArticleStatus;
 }
 
 const initialFilters: FilterState = {
   search: '',
+  category: '',
   status: '',
-  priority: '',
 };
 
-export default function TicketsPage() {
+export default function KnowledgeBasePage() {
   const [filters, setFilters] = useState<FilterState>(initialFilters);
-  const [tickets, setTickets] = useState<TicketsListResponse['data']>([]);
+  const [articles, setArticles] = useState<KnowledgeArticle[]>([]);
   const [page, setPage] = useState(1);
   const [limit] = useState(10);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  async function loadTickets(nextPage: number, nextFilters: FilterState) {
+  async function loadArticles(nextPage: number, nextFilters: FilterState) {
     const token = getAccessToken();
     if (!token) {
+      setError('Please login to view knowledge base.');
       setLoading(false);
-      setError('Please login to view tickets.');
       return;
     }
-    const accessToken = token;
 
     setLoading(true);
     setError(null);
 
     try {
-      const response = await listTickets(accessToken, {
+      const response = await listKnowledgeArticles(token, {
         page: nextPage,
         limit,
         search: nextFilters.search || undefined,
+        category: nextFilters.category || undefined,
         status: nextFilters.status || undefined,
-        priority: nextFilters.priority || undefined,
       });
-      setTickets(response.data);
+      setArticles(response.data);
       setPage(response.meta.page);
       setTotalPages(response.meta.totalPages);
     } catch (fetchError) {
       if (fetchError instanceof ApiError) {
         setError(fetchError.message);
       } else {
-        setError('Could not fetch tickets.');
+        setError('Could not load knowledge base articles.');
       }
     } finally {
       setLoading(false);
@@ -68,18 +67,21 @@ export default function TicketsPage() {
   }
 
   useEffect(() => {
-    void loadTickets(1, filters);
+    void loadArticles(1, filters);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function onFilterSubmit(event: FormEvent<HTMLFormElement>) {
+  function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    void loadTickets(1, filters);
+    void loadArticles(1, filters);
   }
 
   return (
-    <PageSection title="Tickets" subtitle="Internal support requests">
-      <form className="filters-grid" onSubmit={onFilterSubmit}>
+    <PageSection
+      title="Knowledge Base"
+      subtitle="Manage internal support knowledge articles"
+    >
+      <form className="filters-grid" onSubmit={onSubmit}>
         <label>
           Search
           <input
@@ -88,8 +90,28 @@ export default function TicketsPage() {
             onChange={(event) =>
               setFilters((prev) => ({ ...prev, search: event.target.value }))
             }
-            placeholder="Search title or description"
+            placeholder="Search title or content"
           />
+        </label>
+        <label>
+          Category
+          <select
+            value={filters.category}
+            onChange={(event) =>
+              setFilters((prev) => ({
+                ...prev,
+                category: event.target.value as FilterState['category'],
+              }))
+            }
+          >
+            <option value="">Any</option>
+            <option value="HR">HR</option>
+            <option value="IT">IT</option>
+            <option value="FINANCE">FINANCE</option>
+            <option value="OPERATIONS">OPERATIONS</option>
+            <option value="CUSTOMER_SUPPORT">CUSTOMER_SUPPORT</option>
+            <option value="OTHER">OTHER</option>
+          </select>
         </label>
         <label>
           Status
@@ -103,28 +125,9 @@ export default function TicketsPage() {
             }
           >
             <option value="">Any</option>
-            <option value="OPEN">OPEN</option>
-            <option value="IN_PROGRESS">IN_PROGRESS</option>
-            <option value="NEEDS_HUMAN_REVIEW">NEEDS_HUMAN_REVIEW</option>
-            <option value="RESOLVED">RESOLVED</option>
-            <option value="REJECTED">REJECTED</option>
-          </select>
-        </label>
-        <label>
-          Priority
-          <select
-            value={filters.priority}
-            onChange={(event) =>
-              setFilters((prev) => ({
-                ...prev,
-                priority: event.target.value as FilterState['priority'],
-              }))
-            }
-          >
-            <option value="">Any</option>
-            <option value="LOW">LOW</option>
-            <option value="MEDIUM">MEDIUM</option>
-            <option value="HIGH">HIGH</option>
+            <option value="DRAFT">DRAFT</option>
+            <option value="PUBLISHED">PUBLISHED</option>
+            <option value="ARCHIVED">ARCHIVED</option>
           </select>
         </label>
         <button type="submit" className="btn">
@@ -133,59 +136,57 @@ export default function TicketsPage() {
       </form>
 
       <div className="inline-links" style={{ marginTop: '0.9rem' }}>
-        <Link href="/tickets/new" className="inline-link">
-          Create new ticket
+        <Link href="/knowledge-base/new" className="inline-link">
+          Create article
         </Link>
       </div>
 
-      {loading ? <p className="helper-text">Loading tickets...</p> : null}
+      {loading ? <p className="helper-text">Loading articles...</p> : null}
       {error ? <p className="warning">{error}</p> : null}
-      {!loading && !error && tickets.length === 0 ? (
-        <p className="helper-text">No tickets found for current filters.</p>
+      {!loading && !error && articles.length === 0 ? (
+        <p className="helper-text">No articles found for current filters.</p>
       ) : null}
 
-      {!loading && !error && tickets.length > 0 ? (
+      {!loading && !error && articles.length > 0 ? (
         <>
           <div className="table-wrap">
-            <table className="tickets-table" data-testid="tickets-list">
+            <table className="tickets-table">
               <thead>
                 <tr>
                   <th>Title</th>
-                  <th>Status</th>
-                  <th>Priority</th>
                   <th>Category</th>
-                  <th>AI Confidence</th>
-                  <th>Created</th>
+                  <th>Status</th>
+                  <th>Chunks</th>
+                  <th>Updated</th>
                 </tr>
               </thead>
               <tbody>
-                {tickets.map((ticket) => (
-                  <tr key={ticket.id} data-testid="ticket-row">
+                {articles.map((article) => (
+                  <tr key={article.id}>
                     <td>
-                      <Link href={`/tickets/${ticket.id}`} className="inline-link">
-                        {ticket.title}
+                      <Link
+                        href={`/knowledge-base/${article.id}`}
+                        className="inline-link"
+                      >
+                        {article.title}
                       </Link>
                     </td>
-                    <td>{ticket.status}</td>
-                    <td>{ticket.priority}</td>
-                    <td>{ticket.category}</td>
-                    <td>
-                      {ticket.aiConfidence !== null
-                        ? `${Math.round(ticket.aiConfidence * 100)}%`
-                        : 'N/A'}
-                    </td>
-                    <td>{new Date(ticket.createdAt).toLocaleString()}</td>
+                    <td>{article.category}</td>
+                    <td>{article.status}</td>
+                    <td>{article.chunksCount}</td>
+                    <td>{new Date(article.updatedAt).toLocaleString()}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+
           <div className="pager">
             <button
               type="button"
               className="btn subtle-btn"
               disabled={page <= 1}
-              onClick={() => void loadTickets(page - 1, filters)}
+              onClick={() => void loadArticles(page - 1, filters)}
             >
               Previous
             </button>
@@ -196,7 +197,7 @@ export default function TicketsPage() {
               type="button"
               className="btn subtle-btn"
               disabled={page >= totalPages}
-              onClick={() => void loadTickets(page + 1, filters)}
+              onClick={() => void loadArticles(page + 1, filters)}
             >
               Next
             </button>
@@ -206,3 +207,4 @@ export default function TicketsPage() {
     </PageSection>
   );
 }
+

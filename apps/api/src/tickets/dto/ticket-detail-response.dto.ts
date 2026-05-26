@@ -14,6 +14,7 @@ export interface TicketDetailsView {
   aiSummary: string | null;
   aiConfidence: number | null;
   aiRecommendedAction: string | null;
+  aiContextSourcesJson: unknown;
   createdAt: Date;
   updatedAt: Date;
   createdBy: TicketUserSummaryDto;
@@ -54,6 +55,9 @@ export class TicketDetailResponseDto {
   @ApiProperty({ required: false, nullable: true })
   aiRecommendedAction!: string | null;
 
+  @ApiProperty({ required: false, nullable: true })
+  aiContextSourcesJson!: unknown;
+
   @ApiProperty()
   createdAt!: Date;
 
@@ -79,6 +83,7 @@ export class TicketDetailResponseDto {
     dto.aiSummary = ticket.aiSummary;
     dto.aiConfidence = ticket.aiConfidence;
     dto.aiRecommendedAction = ticket.aiRecommendedAction;
+    dto.aiContextSourcesJson = ticket.aiContextSourcesJson;
     dto.createdAt = ticket.createdAt;
     dto.updatedAt = ticket.updatedAt;
     dto.createdBy = ticket.createdBy;

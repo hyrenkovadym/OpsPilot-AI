@@ -1,71 +1,67 @@
 # OpsPilot AI
 
-**Subtitle:** AI-powered internal support and operations automation platform.
+AI-powered internal support and operations automation platform.
 
-OpsPilot AI is a production-style TypeScript portfolio project focused on practical backend architecture and full-stack delivery.  
-Phase 3 adds AI provider abstraction with a safe mock default and optional OpenAI-compatible integration.
+OpsPilot AI is a production-style TypeScript portfolio project focused on backend architecture, practical full-stack implementation, and safe AI automation patterns.
 
 ## Problem Statement
-Internal support requests are often fragmented across email, chat, and spreadsheets. OpsPilot AI centralizes intake, role-based workflow, and auditable status changes while preparing the platform for safe AI-assisted operations.
+Internal support operations are often fragmented across chat, email, and spreadsheets. OpsPilot AI centralizes request intake, role-based workflow, auditable changes, and AI-assisted ticket analysis.
 
 ## Target Users
-- `USER`: submits and tracks personal support tickets.
-- `SUPPORT_AGENT`: triages, assigns, and resolves ticket queues.
-- `ADMIN`: full workflow and operational oversight.
+- `USER`: creates and tracks own support tickets
+- `SUPPORT_AGENT`: triages, assigns, and resolves ticket queues
+- `ADMIN`: full operational access, governance, and knowledge base control
 
 ## Tech Stack
 - Backend: NestJS, TypeScript, Prisma, PostgreSQL, JWT, RBAC, Swagger, Jest
 - Frontend: Next.js App Router, React, TypeScript
-- Infrastructure: Docker, Docker Compose, Redis readiness
-- CI: GitHub Actions
+- Infra: Docker Compose, Redis readiness
+- Testing: API e2e (Jest + Supertest), browser E2E (Playwright)
 
-## Phase 3 Scope (Current)
-- AI module with provider abstraction (`mock` and optional `openai`)
-- Deterministic `MockAiProvider` (default and test-safe)
-- Optional OpenAI-compatible provider with:
-  - configurable `OPENAI_BASE_URL`, `OPENAI_MODEL`
-  - timeout and retry controls
-  - structured JSON parsing + validation
-  - safe error handling (no key leakage)
-- Ticket AI endpoints:
-  - `POST /api/tickets/:id/ai/analyze`
-  - `GET /api/tickets/:id/ai/suggestion`
-- Ticket persistence fields:
-  - `aiSummary`
-  - `aiConfidence`
-  - `aiRecommendedAction`
-- Audit events:
-  - `ticket_ai_analyzed`
-  - `ticket_ai_analysis_failed`
-- Frontend ticket detail/list updates to surface AI analysis
+## Current Scope (Phase 4)
+- Ticket lifecycle workflow (create, assign, status, priority, update)
+- Audit logging for auth, ticket lifecycle, AI, and knowledge base events
+- AI provider abstraction:
+  - default deterministic `mock` provider
+  - optional OpenAI-compatible provider
+- Knowledge Base module:
+  - CRUD + publish/archive/rechunk lifecycle
+  - deterministic chunking
+  - deterministic retrieval/search
+- Simple RAG-like AI flow:
+  - ticket AI analysis retrieves relevant published KB chunks
+  - context sources are returned and stored on ticket
+- Frontend wiring:
+  - auth, tickets, ticket detail AI actions
+  - knowledge base list/new/detail pages
 
-Still intentionally excluded:
+Not included yet:
 - LangChain
-- RAG
+- full RAG/vector DB stack
 - BullMQ
 - WebSockets
-- mandatory real OpenAI dependency for local/test runs
 
 ## API URLs
 - API base: `http://localhost:4000/api`
 - Swagger: `http://localhost:4000/api/docs`
 - Web app: `http://localhost:3000`
 
-Full endpoint reference: [docs/API.md](docs/API.md)
+Detailed endpoints: [docs/API.md](docs/API.md)
 
-## Demo Users (Seed)
-Run:
+## Demo Users
+Run seed:
 ```bash
 npm run prisma:seed -w @opspilot/api
 ```
 
-Accounts (password for all: `Password123!`):
+Credentials (all users):
+- password: `Password123!`
 - `admin@example.com` (`ADMIN`)
 - `agent@example.com` (`SUPPORT_AGENT`)
 - `user@example.com` (`USER`)
 
 ## Environment Variables
-Copy `.env.example` and keep secrets local only.
+Copy `.env.example`.
 
 Core:
 - `NODE_ENV`
@@ -78,32 +74,17 @@ Core:
 - `NEXT_PUBLIC_API_BASE_URL`
 
 AI:
-- `AI_PROVIDER` (`mock` or `openai`, default `mock`)
-- `OPENAI_API_KEY` (optional unless `AI_PROVIDER=openai`)
+- `AI_PROVIDER` (`mock` default, or `openai`)
+- `OPENAI_API_KEY` (required only in `openai` mode)
 - `OPENAI_BASE_URL`
 - `OPENAI_MODEL`
 - `OPENAI_TIMEOUT_SECONDS`
 - `OPENAI_MAX_RETRIES`
 
 ## Local Setup
-Prerequisites:
-- Node.js 22+
-- npm 10+
-- PostgreSQL
-- Redis
-
-Install:
 ```bash
 npm install
-```
-
-Generate Prisma client (required after schema changes):
-```bash
 npm run prisma:generate -w @opspilot/api
-```
-
-DB setup:
-```bash
 npm run prisma:migrate -w @opspilot/api
 npm run prisma:seed -w @opspilot/api
 ```
@@ -124,7 +105,6 @@ npm run dev
 ```
 
 ## Docker Setup
-Start:
 ```bash
 docker compose -f infra/docker-compose.yml up --build
 ```
@@ -136,6 +116,7 @@ docker compose -f infra/docker-compose.yml down
 
 ## Validation Commands
 ```bash
+npm run prisma:generate -w @opspilot/api
 npm run test -w @opspilot/api
 npm run lint -w @opspilot/api
 npm run build -w @opspilot/api
@@ -143,19 +124,27 @@ npm run build -w @opspilot/web
 docker compose -f infra/docker-compose.yml config
 ```
 
-## AI Safety Notes
-- Default mode is `AI_PROVIDER=mock`; app is runnable without API keys.
-- Tests never call real OpenAI and never require network access for AI scenarios.
-- AI output is validated before persistence.
-- AI errors are handled safely and audited without exposing credentials.
+## Browser E2E
+Start required stack:
+```bash
+docker compose -f infra/docker-compose.yml up -d --build postgres redis api web
+```
 
-## Roadmap
-See [docs/ROADMAP.md](docs/ROADMAP.md).
+Run migrations/seed if needed:
+```bash
+docker compose -f infra/docker-compose.yml exec api npm run prisma:migrate
+docker compose -f infra/docker-compose.yml exec api npm run prisma:seed
+```
+
+Run E2E:
+```bash
+npm run test:e2e -w @opspilot/web
+```
+
+## Architecture Docs
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- [docs/RAG.md](docs/RAG.md)
+- [docs/ROADMAP.md](docs/ROADMAP.md)
 
 ## Portfolio Summary
-Phase 3 demonstrates:
-- clean provider abstraction boundaries
-- resilient AI integration with safe fallback defaults
-- validated structured AI outputs
-- unchanged core ticket workflow with additive AI capabilities
-- practical security posture for secrets and error handling
+Phase 4 demonstrates a safe, testable RAG-style foundation with clean module boundaries, deterministic local behavior, and no hard dependency on external AI services.

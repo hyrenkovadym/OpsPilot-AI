@@ -1,130 +1,140 @@
-# OpsPilot AI API (Phase 3)
+# OpsPilot AI API (Phase 4)
 
 Base URL: `http://localhost:4000/api`  
 Swagger: `http://localhost:4000/api/docs`
 
 ## Auth
-
-### POST `/auth/register`
-Creates a `USER` account and returns access token.
-
-### POST `/auth/login`
-Authenticates user and returns access token.
-
-### GET `/auth/me`
-Returns authenticated user profile.
+- `POST /auth/register`
+- `POST /auth/login`
+- `GET /auth/me`
 
 ## Health
+- `GET /health`
+- `GET /ready`
 
-### GET `/health`
-Simple status check.
-
-### GET `/ready`
-Readiness check with database verification.
+## Roles
+- `USER`
+- `SUPPORT_AGENT`
+- `ADMIN`
 
 ## Tickets
 
-Auth for ticket routes: `Bearer <accessToken>`
+All ticket endpoints require `Bearer <accessToken>`.
 
-### POST `/tickets`
-Create ticket.
+- `POST /tickets`
+- `GET /tickets`
+- `GET /tickets/:id`
+- `PATCH /tickets/:id/status`
+- `PATCH /tickets/:id/assign`
+- `PATCH /tickets/:id/priority`
+- `PATCH /tickets/:id`
 
-Roles: `USER`, `SUPPORT_AGENT`, `ADMIN`
-
-### GET `/tickets`
-List with filters + pagination.
-
-Roles:
+### Ticket Visibility
 - `USER`: own tickets only
 - `SUPPORT_AGENT`, `ADMIN`: all tickets
 
-Query params:
+### Ticket Filters (`GET /tickets`)
 - `status`
 - `category`
 - `priority`
 - `assignedToId`
-- `createdById` (ignored in user-scoped mode)
+- `createdById` (ignored for `USER`)
 - `search`
 - `page` (default `1`)
 - `limit` (default `10`)
 
-### GET `/tickets/:id`
-Ticket detail response includes:
-- `createdBy` summary
-- `assignedTo` summary (if assigned)
-- `aiSummary`
-- `aiConfidence`
-- `aiRecommendedAction`
-
-Visibility:
-- `USER`: own ticket only
-- `SUPPORT_AGENT`, `ADMIN`: any ticket
-
-### PATCH `/tickets/:id/status`
-Status update.
-
-Roles:
-- `SUPPORT_AGENT`, `ADMIN`: full status updates
-- `USER`: own ticket, only to `RESOLVED`
-
-### PATCH `/tickets/:id/assign`
-Assignment update.
-
-Roles: `SUPPORT_AGENT`, `ADMIN`
-
-### PATCH `/tickets/:id/priority`
-Priority update.
-
-Roles: `SUPPORT_AGENT`, `ADMIN`
-
-### PATCH `/tickets/:id`
-Partial ticket updates (`title`, `description`, `category`).
-
-Roles:
-- `SUPPORT_AGENT`, `ADMIN`: any ticket
-- `USER`: own ticket while status is `OPEN`
-
 ## Ticket AI Endpoints
 
-### POST `/tickets/:id/ai/analyze`
-Runs AI analysis and updates ticket fields:
-- `category`
-- `priority`
-- `aiSummary`
-- `aiConfidence`
-- `aiRecommendedAction`
+- `POST /tickets/:id/ai/analyze`
+- `GET /tickets/:id/ai/suggestion`
 
-Response:
+### Behavior
+- Uses configured provider (`mock` by default)
+- Retrieves relevant published KB chunks before analysis
+- Updates ticket with:
+  - `category`
+  - `priority`
+  - `aiSummary`
+  - `aiConfidence`
+  - `aiRecommendedAction`
+  - `aiContextSourcesJson`
+
+### Response (analyze/suggestion)
 ```json
 {
   "category": "IT",
   "priority": "HIGH",
-  "aiSummary": "Ticket summary...",
-  "aiConfidence": 0.91,
-  "recommendedAction": "Escalate to on-call support...",
-  "provider": "mock"
+  "aiSummary": "Short summary...",
+  "aiConfidence": 0.86,
+  "recommendedAction": "Escalate and follow KB troubleshooting steps.",
+  "provider": "mock",
+  "contextSources": [
+    {
+      "articleId": "uuid",
+      "title": "IT access issue troubleshooting",
+      "score": 12
+    }
+  ]
 }
 ```
 
-Visibility:
-- `USER`: own ticket only
-- `SUPPORT_AGENT`, `ADMIN`: any ticket
+## Knowledge Base
 
-### GET `/tickets/:id/ai/suggestion`
-Returns AI suggestion payload. If no stored suggestion exists, service can compute one on demand.
+Prefix: `/knowledge-base`
 
-Visibility:
-- `USER`: own ticket only
-- `SUPPORT_AGENT`, `ADMIN`: any ticket
+### Endpoints
+- `POST /knowledge-base/articles`
+- `GET /knowledge-base/articles`
+- `GET /knowledge-base/articles/:id`
+- `PATCH /knowledge-base/articles/:id`
+- `DELETE /knowledge-base/articles/:id`
+- `POST /knowledge-base/articles/:id/publish`
+- `POST /knowledge-base/articles/:id/archive`
+- `POST /knowledge-base/articles/:id/rechunk`
+- `GET /knowledge-base/search`
+
+### Article Status
+- `DRAFT`
+- `PUBLISHED`
+- `ARCHIVED`
+
+### Permissions
+- `USER`:
+  - cannot create/update/publish/archive/delete
+  - can read/search published content only
+- `SUPPORT_AGENT`:
+  - can create/update/publish/archive/rechunk
+- `ADMIN`:
+  - all permissions (including delete)
+
+### List Articles Query (`GET /knowledge-base/articles`)
+- `category`
+- `status`
+- `search`
+- `includeNonPublished` (support/admin only)
+- `page`
+- `limit`
+
+### Search Query (`GET /knowledge-base/search`)
+- `query`
+- `category`
+- `limit`
+- `includeNonPublished` (support/admin only)
+
+### Search Response
+- `articleId`
+- `articleTitle`
+- `category`
+- `status`
+- `chunkContent`
+- `score`
 
 ## AI Provider Modes
-
-Environment:
-- `AI_PROVIDER=mock` (default)
+- `AI_PROVIDER=mock` (default, deterministic, no network)
 - `AI_PROVIDER=openai` (optional)
 
 OpenAI-compatible mode uses:
-- `OPENAI_API_KEY` (required in openai mode)
+- `OPENAI_API_KEY` (required for openai mode)
 - `OPENAI_BASE_URL`
 - `OPENAI_MODEL`
 - `OPENAI_TIMEOUT_SECONDS`
@@ -132,7 +142,9 @@ OpenAI-compatible mode uses:
 
 ## Audit Events
 
-Workflow events:
+Ticket/auth:
+- `user_registered`
+- `user_logged_in`
 - `ticket_created`
 - `ticket_status_updated`
 - `ticket_assigned`
@@ -140,23 +152,17 @@ Workflow events:
 - `ticket_updated`
 - `ticket_resolved`
 - `ticket_rejected`
-
-AI events:
 - `ticket_ai_analyzed`
 - `ticket_ai_analysis_failed`
+- `ticket_ai_context_retrieved`
 
-Audit metadata stores safe before/after and provider context. Secrets are never included.
+Knowledge base:
+- `knowledge_article_created`
+- `knowledge_article_updated`
+- `knowledge_article_published`
+- `knowledge_article_archived`
+- `knowledge_article_deleted`
+- `knowledge_article_rechunked`
+- `knowledge_search_performed`
 
-## Demo Accounts
-
-Seed:
-```bash
-npm run prisma:seed -w @opspilot/api
-```
-
-Users:
-- `admin@example.com` (`ADMIN`)
-- `agent@example.com` (`SUPPORT_AGENT`)
-- `user@example.com` (`USER`)
-
-Password: `Password123!`
+Audit metadata excludes secrets and API keys.
