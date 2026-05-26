@@ -17,6 +17,7 @@ apps/web/test-results/
 # Environment
 .env
 .env.*
+.env.local
 !.env.example
 apps/api/.env
 apps/web/.env
@@ -38,3 +39,10 @@ Thumbs.db
 # Prisma
 apps/api/prisma/dev.db
 apps/api/prisma/dev.db-journal
+
+# Secrets and credentials
+*credentials*.json
+*secret*.key
+*service-account*.json
+service-account.json
+credentials.json

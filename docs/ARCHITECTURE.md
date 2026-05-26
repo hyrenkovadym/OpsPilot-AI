@@ -1,4 +1,4 @@
-# OpsPilot AI Architecture (Phase 7)
+# OpsPilot AI Architecture (v1.0.0)
 
 ## Monorepo
 - `apps/api`: NestJS backend

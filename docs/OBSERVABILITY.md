@@ -1,4 +1,4 @@
-# OpsPilot AI Observability Notes (Phase 7)
+# OpsPilot AI Observability Notes (v1.0.0)
 
 ## Objectives
 - correlate requests and async flows end-to-end

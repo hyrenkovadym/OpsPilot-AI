@@ -251,7 +251,6 @@ async function main(): Promise<void> {
       entityId: 'seed',
       metadata: {
         users: ['admin@example.com', 'agent@example.com', 'user@example.com'],
-        defaultPassword: 'Password123!',
       },
     },
   });

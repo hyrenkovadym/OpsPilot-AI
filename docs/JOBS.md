@@ -1,4 +1,4 @@
-# OpsPilot AI Jobs (Phase 7)
+# OpsPilot AI Jobs (v1.0.0)
 
 ## Overview
 BullMQ background processing covers:

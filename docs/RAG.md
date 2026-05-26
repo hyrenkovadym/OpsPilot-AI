@@ -1,4 +1,4 @@
-# OpsPilot AI Simple RAG Notes (Phase 7)
+# OpsPilot AI Simple RAG Notes (v1.0.0)
 
 ## What "Simple RAG" Means Here
 This project uses a lightweight retrieval-augmented approach without a vector database yet.

@@ -1,4 +1,4 @@
-# OpsPilot AI Realtime (Phase 7)
+# OpsPilot AI Realtime (v1.0.0)
 
 ## Overview
 Socket.IO realtime delivery runs on top of REST + BullMQ.

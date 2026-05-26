@@ -1,71 +1,74 @@
-# OpsPilot AI Security Notes (Phase 7)
+# OpsPilot AI Security Notes (v1.0.0)
 
-## Security Goals
-- keep platform runnable in local/demo mode without secrets
-- enforce auth/RBAC and ownership checks
-- avoid secret leakage in logs, responses, and realtime payloads
+## Security Objectives
+- keep the repository free from secrets and private credentials
+- enforce least-privilege access with JWT + RBAC + ownership checks
+- provide safe operational visibility without leaking sensitive values
+
+## Repository Safety
+Ignored by `.gitignore`:
+- `.env`
+- `.env.local`
+- `node_modules/`
+- `.next/`
+- `dist/`
+- `coverage/`
+- `logs/`
+- common credential/service account file patterns
+
+Policy:
+- do not commit API keys, credentials, service account files, or private local artifacts
+- use `.env.example` placeholders only
 
 ## Authentication and Authorization
-- JWT access token for protected API routes
-- role-based access control (`USER`, `SUPPORT_AGENT`, `ADMIN`)
-- service-level ownership checks for ticket/job visibility
-- websocket connections authenticate via JWT token in Socket.IO auth payload
+- JWT access token protects API routes
+- role model: `USER`, `SUPPORT_AGENT`, `ADMIN`
+- service-level ownership checks protect tickets/jobs/article visibility
+- websocket connections require JWT access token
 
-## Request ID and Error Safety
-- API reads `X-Request-ID` or generates one
+## Request and Error Safety
+- request IDs are accepted via `X-Request-ID` or generated automatically
 - response includes `X-Request-ID`
-- error body includes `requestId`
-- internal stack traces are not exposed in API responses
+- normalized errors include `requestId`
+- internal stack traces are not exposed in public API responses
+
+## Secrets Handling
+- no secrets returned from `/api/system/info` or `/api/ready`
+- no API keys in structured logs or realtime payloads
+- OpenAI API key is optional and only required in `AI_PROVIDER=openai`
+- mock mode is default and keyless
+
+## CORS and Headers
+- CORS origin values are validated as full URL list
+- security headers are enabled for safer default browser behavior
 
 ## Rate Limiting
-Route-level limits are applied to:
+Applied to:
 - `POST /auth/register`
 - `POST /auth/login`
 - `POST /tickets/:id/ai/analyze`
 - `GET /knowledge-base/search`
 
-## Security Headers and CORS
-- security headers are added globally (content type, frame, referrer, DNS prefetch, opener policy)
-- CORS origins are validated as full URL(s)
-- comma-separated origin lists are supported for API and socket CORS settings
+Limitation:
+- current limiter is in-memory per process
+- production should use distributed rate limiting (Redis-backed) for multi-instance deployments
 
-## Secrets Handling
-Do not commit:
-- `.env`, `.env.local`
-- API keys
-- credentials/service account files
+## Frontend Token Storage Note
+- current frontend stores access token in `localStorage` for demo simplicity
+- production-grade setup should prefer hardened cookie/session strategy and stricter browser security controls
 
-No secrets in:
-- `/api/system/info`
-- `/api/ready`
-- structured logs
-- realtime payloads
-- public error messages
-
-## AI Safety Constraints
-- default `AI_PROVIDER=mock`
-- optional OpenAI mode only when configured
-- tests never call real OpenAI
-- keys are never logged or returned
+## Transport and Deployment Requirements
+- production deployment must enforce HTTPS/TLS
+- secure reverse proxy and trusted host configuration are required for public environments
 
 ## Realtime Security
-- invalid socket auth is rejected safely
-- room subscriptions are permission-checked (`ticket:{id}`, `job:{id}`)
-- payloads exclude tokens/passwords/keys/raw prompt dumps
-- polling fallback remains available for resiliency
+- invalid socket tokens are rejected safely
+- room joins are permission-checked (`ticket:{id}`, `job:{id}`)
+- payloads exclude tokens, password hashes, API keys, prompts, and full KB raw content
+- polling fallback remains available to reduce missed-update risk
 
-## Audit Safety
-Audit events capture operational metadata only.
-Avoid storing:
-- JWT/token material
-- API keys
-- full prompt text
-- full KB raw content
-
-Audit metadata includes request correlation (`requestId`) where available.
-
-## Remaining Hardening Scope (Phase 8 candidates)
-- stricter password policy checks and auth abuse analytics
-- optional Redis-backed distributed rate limiting
-- secret scanner/pre-commit policy automation
-- deployment-specific TLS/proxy hardening checklist
+## Recommended Next Hardening Steps
+- secret scanning in CI/pre-commit hooks
+- distributed rate limiting strategy
+- token rotation/blacklist strategy for high-security environments
+- deployment-specific security baseline checklist (WAF, CSP tuning, HSTS, etc.)

@@ -1,4 +1,4 @@
-# OpsPilot AI API (Phase 7)
+# OpsPilot AI API (v1.0.0)
 
 Base URL: `http://localhost:4000/api`  
 Swagger: `http://localhost:4000/api/docs`

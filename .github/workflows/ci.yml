@@ -8,6 +8,11 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    env:
+      AI_PROVIDER: mock
+      OPENAI_API_KEY: ""
+      QUEUE_MODE: sync
+      REALTIME_ENABLED: "false"
 
     steps:
       - name: Checkout
