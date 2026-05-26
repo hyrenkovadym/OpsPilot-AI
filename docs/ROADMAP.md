@@ -29,12 +29,14 @@
 - Frontend knowledge base management pages
 - Expanded backend tests for permissions, retrieval, and AI context flow
 
-## Phase 5 (Next): BullMQ Background Jobs
+## Phase 5 (Completed): BullMQ Background Jobs
 - Async ticket analysis jobs
-- Retry/backoff and dead-letter strategy
-- Job observability and operational controls
+- Async knowledge base rechunk jobs
+- Retry/backoff handling
+- Worker runtime + Docker worker service
+- Background job status endpoints and polling-ready frontend UX
 
-## Phase 6: Socket.IO Real-Time Updates
+## Phase 6 (Next): Socket.IO Real-Time Updates
 - Real-time ticket status/assignment updates
 - Live queue refresh for support views
 - Authenticated event channels

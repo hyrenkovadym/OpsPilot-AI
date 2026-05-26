@@ -14,10 +14,12 @@ import {
 import {
   ApiBearerAuth,
   ApiCreatedResponse,
+  ApiExtraModels,
   ApiNoContentResponse,
   ApiOkResponse,
   ApiOperation,
   ApiTags,
+  getSchemaPath,
 } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
@@ -26,6 +28,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import type { AuthenticatedUser } from '../common/types/jwt-payload.type';
+import { QueuedJobResponseDto } from '../jobs/dto/queued-job-response.dto';
 import { ArticleResponseDto } from './dto/article-response.dto';
 import { CreateArticleDto } from './dto/create-article.dto';
 import { ListArticlesQueryDto } from './dto/list-articles-query.dto';
@@ -36,6 +39,7 @@ import { KnowledgeBaseService } from './knowledge-base.service';
 import { RetrievalService } from './retrieval.service';
 
 @ApiTags('knowledge-base')
+@ApiExtraModels(ArticleResponseDto, QueuedJobResponseDto)
 @ApiBearerAuth('access-token')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('knowledge-base')
@@ -128,11 +132,18 @@ export class KnowledgeBaseController {
   @Post('articles/:id/rechunk')
   @Roles(Role.SUPPORT_AGENT, Role.ADMIN)
   @ApiOperation({ summary: 'Rebuild article chunks' })
-  @ApiOkResponse({ type: ArticleResponseDto })
+  @ApiOkResponse({
+    schema: {
+      oneOf: [
+        { $ref: getSchemaPath(ArticleResponseDto) },
+        { $ref: getSchemaPath(QueuedJobResponseDto) },
+      ],
+    },
+  })
   rechunkArticle(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id', new ParseUUIDPipe()) id: string,
-  ): Promise<ArticleResponseDto> {
+  ): Promise<ArticleResponseDto | QueuedJobResponseDto> {
     return this.knowledgeBaseService.rechunkArticle(user, id);
   }
 

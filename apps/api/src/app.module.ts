@@ -6,6 +6,7 @@ import { AuthModule } from './auth/auth.module';
 import configuration from './config/configuration';
 import { validateEnv } from './config/env.validation';
 import { HealthModule } from './health/health.module';
+import { JobsModule } from './jobs/jobs.module';
 import { KnowledgeBaseModule } from './knowledge-base/knowledge-base.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { TicketsModule } from './tickets/tickets.module';
@@ -23,6 +24,7 @@ import { UsersModule } from './users/users.module';
     UsersModule,
     AiModule,
     AuditModule,
+    JobsModule.register(),
     AuthModule,
     KnowledgeBaseModule,
     TicketsModule,

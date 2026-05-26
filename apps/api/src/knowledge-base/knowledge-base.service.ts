@@ -6,6 +6,8 @@ import {
 import { KnowledgeArticleStatus, Prisma, Role } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
 import type { AuthenticatedUser } from '../common/types/jwt-payload.type';
+import { QueuedJobResponseDto } from '../jobs/dto/queued-job-response.dto';
+import { JobsService } from '../jobs/jobs.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ChunkingService } from './chunking.service';
 import { ArticleResponseDto } from './dto/article-response.dto';
@@ -31,6 +33,7 @@ export class KnowledgeBaseService {
     private readonly prisma: PrismaService,
     private readonly chunkingService: ChunkingService,
     private readonly auditService: AuditService,
+    private readonly jobsService: JobsService,
   ) {}
 
   async createArticle(
@@ -278,32 +281,66 @@ export class KnowledgeBaseService {
   async rechunkArticle(
     user: AuthenticatedUser,
     id: string,
-  ): Promise<ArticleResponseDto> {
+  ): Promise<ArticleResponseDto | QueuedJobResponseDto> {
     this.assertCanManageArticle(user);
-    const existing = await this.requireArticle(id);
+    await this.requireArticle(id);
 
-    const chunksCount = await this.rebuildChunks(existing.id, existing.content);
-    const article = await this.prisma.knowledgeBaseArticle.update({
-      where: { id },
-      data: {
-        updatedById: user.sub,
-      },
-      include: articleWithCountInclude,
-    });
+    if (this.jobsService.isAsyncMode()) {
+      return this.jobsService.enqueueKnowledgeRechunk({
+        actorId: user.sub,
+        articleId: id,
+      });
+    }
 
-    await this.auditService.log({
+    return this.rechunkArticleSync({
+      articleId: id,
       actorId: user.sub,
-      action: 'knowledge_article_rechunked',
+    });
+  }
+
+  async rechunkArticleForJob(input: {
+    articleId: string;
+    actorId: string;
+    backgroundJobId: string;
+    queueName: string;
+    jobName: string;
+  }): Promise<ArticleResponseDto> {
+    await this.auditService.log({
+      actorId: input.actorId,
+      action: 'knowledge_article_rechunk_started',
       entityType: 'knowledge_article',
-      entityId: id,
+      entityId: input.articleId,
       metadata: {
-        category: article.category,
-        status: article.status,
-        chunksCount,
+        jobId: input.backgroundJobId,
+        queueName: input.queueName,
+        jobName: input.jobName,
+        status: 'PROCESSING',
       },
     });
 
-    return this.mapArticleResponse(article);
+    try {
+      return this.rechunkArticleSync({
+        articleId: input.articleId,
+        actorId: input.actorId,
+        backgroundJobId: input.backgroundJobId,
+        queueName: input.queueName,
+        jobName: input.jobName,
+      });
+    } catch (error) {
+      await this.auditService.log({
+        actorId: input.actorId,
+        action: 'knowledge_article_rechunk_failed',
+        entityType: 'knowledge_article',
+        entityId: input.articleId,
+        metadata: {
+          jobId: input.backgroundJobId,
+          queueName: input.queueName,
+          jobName: input.jobName,
+          reason: this.safeErrorMessage(error),
+        },
+      });
+      throw error;
+    }
   }
 
   private buildListWhere(
@@ -412,5 +449,46 @@ export class KnowledgeBaseService {
       .split('')
       .map((char) => Number(((char.charCodeAt(0) % 32) / 32).toFixed(2)));
     return values;
+  }
+
+  private safeErrorMessage(error: unknown): string {
+    const message =
+      error instanceof Error ? error.message : 'Knowledge base worker error';
+    return message.replace(/sk-[a-zA-Z0-9_-]+/g, '[redacted]').slice(0, 240);
+  }
+
+  private async rechunkArticleSync(input: {
+    articleId: string;
+    actorId: string;
+    backgroundJobId?: string;
+    queueName?: string;
+    jobName?: string;
+  }): Promise<ArticleResponseDto> {
+    const existing = await this.requireArticle(input.articleId);
+    const chunksCount = await this.rebuildChunks(existing.id, existing.content);
+    const article = await this.prisma.knowledgeBaseArticle.update({
+      where: { id: input.articleId },
+      data: {
+        updatedById: input.actorId,
+      },
+      include: articleWithCountInclude,
+    });
+
+    await this.auditService.log({
+      actorId: input.actorId,
+      action: 'knowledge_article_rechunked',
+      entityType: 'knowledge_article',
+      entityId: input.articleId,
+      metadata: {
+        jobId: input.backgroundJobId ?? null,
+        queueName: input.queueName ?? null,
+        jobName: input.jobName ?? null,
+        category: article.category,
+        status: article.status,
+        chunksCount,
+      },
+    });
+
+    return this.mapArticleResponse(article);
   }
 }

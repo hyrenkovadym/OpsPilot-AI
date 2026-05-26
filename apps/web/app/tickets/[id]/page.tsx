@@ -8,10 +8,12 @@ import {
   analyzeTicket,
   ApiError,
   assignTicketTo,
+  getJob,
   getAccessToken,
   getTicketAiSuggestion,
   getCurrentUser,
   getTicket,
+  isQueuedJobResponse,
   type TicketDetail,
   type TicketStatus,
   updateTicketStatus,
@@ -25,6 +27,7 @@ export default function TicketDetailsPage() {
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
+  const [aiJobMessage, setAiJobMessage] = useState<string | null>(null);
 
   async function loadTicket() {
     const token = getAccessToken();
@@ -114,9 +117,18 @@ export default function TicketDetailsPage() {
 
     setAiLoading(true);
     setError(null);
+    setAiJobMessage(null);
 
     try {
       const analysis = await analyzeTicket(token, params.id);
+      if (isQueuedJobResponse(analysis)) {
+        setAiJobMessage('AI analysis queued. Waiting for worker...');
+        await pollJobUntilDone(token, analysis.jobId);
+        await loadTicket();
+        setAiJobMessage('AI analysis completed.');
+        return;
+      }
+
       setTicket((prev) =>
         prev
           ? {
@@ -139,6 +151,33 @@ export default function TicketDetailsPage() {
     } finally {
       setAiLoading(false);
     }
+  }
+
+  async function pollJobUntilDone(token: string, jobId: string): Promise<void> {
+    const maxChecks = 30;
+    for (let attempt = 0; attempt < maxChecks; attempt += 1) {
+      const job = await getJob(token, jobId);
+      if (job.status === 'COMPLETED') {
+        return;
+      }
+      if (job.status === 'FAILED') {
+        throw new ApiError(
+          job.lastError ?? 'AI analysis job failed.',
+          500,
+          { jobId, status: job.status },
+        );
+      }
+      setAiJobMessage(`AI analysis ${job.status.toLowerCase()}...`);
+      await new Promise((resolve) => {
+        setTimeout(resolve, 2000);
+      });
+    }
+
+    throw new ApiError(
+      'AI analysis job is still running. Please refresh in a moment.',
+      408,
+      { jobId },
+    );
   }
 
   async function refreshAiSuggestion() {
@@ -186,6 +225,7 @@ export default function TicketDetailsPage() {
       </div>
       {loading ? <p className="helper-text">Loading ticket...</p> : null}
       {error ? <p className="warning">{error}</p> : null}
+      {aiJobMessage ? <p className="helper-text">{aiJobMessage}</p> : null}
       {!loading && !error && !ticket ? (
         <p className="helper-text">Ticket not found.</p>
       ) : null}

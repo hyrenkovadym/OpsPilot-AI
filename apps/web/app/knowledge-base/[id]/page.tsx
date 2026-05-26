@@ -9,7 +9,9 @@ import {
   archiveKnowledgeArticle,
   deleteKnowledgeArticle,
   getAccessToken,
+  getJob,
   getKnowledgeArticle,
+  isQueuedJobResponse,
   publishKnowledgeArticle,
   rechunkKnowledgeArticle,
   updateKnowledgeArticle,
@@ -40,6 +42,7 @@ export default function KnowledgeArticleDetailPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [jobMessage, setJobMessage] = useState<string | null>(null);
 
   async function loadArticle() {
     const token = getAccessToken();
@@ -84,6 +87,7 @@ export default function KnowledgeArticleDetailPage() {
     setSaving(true);
     setError(null);
     setSuccess(null);
+    setJobMessage(null);
 
     try {
       const updated = await updateKnowledgeArticle(token, params.id, form);
@@ -127,6 +131,68 @@ export default function KnowledgeArticleDetailPage() {
     }
   }
 
+  async function handleRechunk(): Promise<void> {
+    const token = getAccessToken();
+    if (!token) {
+      setError('Please login first.');
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+    setSuccess(null);
+    setJobMessage(null);
+
+    try {
+      const result = await rechunkKnowledgeArticle(token, params.id);
+      if (isQueuedJobResponse(result)) {
+        setJobMessage('Rechunk job queued. Waiting for worker...');
+        await pollJobUntilDone(token, result.jobId);
+        await loadArticle();
+        setSuccess('Article chunks rebuilt asynchronously.');
+      } else {
+        setArticle(result);
+        setForm(toFormState(result));
+        setSuccess('Article chunks rebuilt.');
+      }
+    } catch (actionError) {
+      if (actionError instanceof ApiError) {
+        setError(actionError.message);
+      } else {
+        setError('Could not rechunk article.');
+      }
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function pollJobUntilDone(token: string, jobId: string): Promise<void> {
+    const maxChecks = 30;
+    for (let attempt = 0; attempt < maxChecks; attempt += 1) {
+      const job = await getJob(token, jobId);
+      if (job.status === 'COMPLETED') {
+        return;
+      }
+      if (job.status === 'FAILED') {
+        throw new ApiError(
+          job.lastError ?? 'Background job failed.',
+          500,
+          { jobId, status: job.status },
+        );
+      }
+      setJobMessage(`Rechunk job ${job.status.toLowerCase()}...`);
+      await new Promise((resolve) => {
+        setTimeout(resolve, 2000);
+      });
+    }
+
+    throw new ApiError(
+      'Rechunk job is still running. Please refresh in a moment.',
+      408,
+      { jobId },
+    );
+  }
+
   return (
     <PageSection
       title="Knowledge Article Detail"
@@ -141,6 +207,7 @@ export default function KnowledgeArticleDetailPage() {
       {loading ? <p className="helper-text">Loading article...</p> : null}
       {error ? <p className="warning">{error}</p> : null}
       {success ? <p className="helper-text">{success}</p> : null}
+      {jobMessage ? <p className="helper-text">{jobMessage}</p> : null}
 
       {!loading && !error && article && form ? (
         <>
@@ -249,15 +316,7 @@ export default function KnowledgeArticleDetailPage() {
               type="button"
               className="btn subtle-btn"
               disabled={saving}
-              onClick={() =>
-                void runAction(async () => {
-                  const token = getAccessToken();
-                  if (!token) {
-                    throw new Error('Please login first.');
-                  }
-                  return rechunkKnowledgeArticle(token, params.id);
-                }, 'Article chunks rebuilt.')
-              }
+              onClick={() => void handleRechunk()}
             >
               Rechunk
             </button>
@@ -293,4 +352,3 @@ export default function KnowledgeArticleDetailPage() {
     </PageSection>
   );
 }
-

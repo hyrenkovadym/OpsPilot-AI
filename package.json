@@ -12,7 +12,8 @@
     "build": "npm run build -w @opspilot/api && npm run build -w @opspilot/web",
     "test": "npm run test -w @opspilot/api",
     "lint": "npm run lint -w @opspilot/api && npm run lint -w @opspilot/web",
-    "test:e2e": "npm run test:e2e -w @opspilot/web"
+    "test:e2e": "npm run test:e2e -w @opspilot/web",
+    "worker": "npm run worker -w @opspilot/api"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"

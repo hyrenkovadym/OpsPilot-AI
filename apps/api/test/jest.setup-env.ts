@@ -12,3 +12,7 @@ process.env.OPENAI_BASE_URL = 'https://api.openai.com/v1';
 process.env.OPENAI_MODEL = 'gpt-4o-mini';
 process.env.OPENAI_TIMEOUT_SECONDS = '20';
 process.env.OPENAI_MAX_RETRIES = '1';
+process.env.QUEUE_MODE = 'sync';
+process.env.BULLMQ_REDIS_URL = 'redis://localhost:6379';
+process.env.BULLMQ_DEFAULT_ATTEMPTS = '3';
+process.env.BULLMQ_BACKOFF_MS = '5000';

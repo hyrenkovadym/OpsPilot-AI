@@ -1,4 +1,4 @@
-# OpsPilot AI Simple RAG Notes (Phase 4)
+# OpsPilot AI Simple RAG Notes (Phase 5)
 
 ## What "Simple RAG" Means Here
 This phase adds retrieval-augmented behavior without introducing heavy vector infrastructure.
@@ -57,12 +57,12 @@ Top-N results are returned with:
 
 ## Current Limitations
 - No semantic embeddings/vector similarity yet
-- No async/background indexing pipeline
+- No semantic reranker yet
 - No citation confidence calibration beyond deterministic scoring
 
 ## Planned Upgrade Path
 Future phases can introduce:
 1. pgvector or external vector DB
 2. embedding generation pipeline
-3. async chunk indexing with BullMQ
-4. stronger retrieval/reranking strategies
+3. stronger retrieval/reranking strategies
+4. citation grounding quality metrics

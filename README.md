@@ -18,7 +18,7 @@ Internal support operations are often fragmented across chat, email, and spreads
 - Infra: Docker Compose, Redis readiness
 - Testing: API e2e (Jest + Supertest), browser E2E (Playwright)
 
-## Current Scope (Phase 4)
+## Current Scope (Phase 5)
 - Ticket lifecycle workflow (create, assign, status, priority, update)
 - Audit logging for auth, ticket lifecycle, AI, and knowledge base events
 - AI provider abstraction:
@@ -31,6 +31,11 @@ Internal support operations are often fragmented across chat, email, and spreads
 - Simple RAG-like AI flow:
   - ticket AI analysis retrieves relevant published KB chunks
   - context sources are returned and stored on ticket
+- Background jobs with BullMQ:
+  - async ticket AI analysis queue + worker processing
+  - async knowledge base rechunk queue + worker processing
+  - persisted background job status tracking
+  - sync fallback mode for deterministic tests/local fallback
 - Frontend wiring:
   - auth, tickets, ticket detail AI actions
   - knowledge base list/new/detail pages
@@ -38,7 +43,6 @@ Internal support operations are often fragmented across chat, email, and spreads
 Not included yet:
 - LangChain
 - full RAG/vector DB stack
-- BullMQ
 - WebSockets
 
 ## API URLs
@@ -81,6 +85,12 @@ AI:
 - `OPENAI_TIMEOUT_SECONDS`
 - `OPENAI_MAX_RETRIES`
 
+Jobs:
+- `QUEUE_MODE` (`async` default, `sync` fallback)
+- `BULLMQ_REDIS_URL`
+- `BULLMQ_DEFAULT_ATTEMPTS`
+- `BULLMQ_BACKOFF_MS`
+
 ## Local Setup
 ```bash
 npm install
@@ -92,6 +102,11 @@ npm run prisma:seed -w @opspilot/api
 Run API:
 ```bash
 npm run start:dev -w @opspilot/api
+```
+
+Run worker:
+```bash
+npm run worker:dev -w @opspilot/api
 ```
 
 Run web:
@@ -127,7 +142,7 @@ docker compose -f infra/docker-compose.yml config
 ## Browser E2E
 Start required stack:
 ```bash
-docker compose -f infra/docker-compose.yml up -d --build postgres redis api web
+docker compose -f infra/docker-compose.yml up -d --build postgres redis api worker web
 ```
 
 Run migrations/seed if needed:
@@ -141,10 +156,20 @@ Run E2E:
 npm run test:e2e -w @opspilot/web
 ```
 
+## Async Job Flow
+In `QUEUE_MODE=async`:
+- `POST /tickets/:id/ai/analyze` enqueues a job and returns `jobId`
+- `POST /knowledge-base/articles/:id/rechunk` enqueues a job and returns `jobId`
+- use `GET /jobs/:id` (or `GET /jobs/tickets/:ticketId`) for status polling
+
+In `QUEUE_MODE=sync`:
+- analysis/rechunk are performed immediately in the API process
+
 ## Architecture Docs
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - [docs/RAG.md](docs/RAG.md)
+- [docs/JOBS.md](docs/JOBS.md)
 - [docs/ROADMAP.md](docs/ROADMAP.md)
 
 ## Portfolio Summary
-Phase 4 demonstrates a safe, testable RAG-style foundation with clean module boundaries, deterministic local behavior, and no hard dependency on external AI services.
+Phase 5 adds production-style async orchestration with BullMQ workers, retry/backoff handling, and auditable job state tracking while preserving deterministic mock AI behavior.

@@ -12,9 +12,11 @@ import {
 import {
   ApiBearerAuth,
   ApiCreatedResponse,
+  ApiExtraModels,
   ApiOkResponse,
   ApiOperation,
   ApiTags,
+  getSchemaPath,
 } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 import { AiAnalysisResponseDto } from '../ai/dto/ai-analysis-response.dto';
@@ -23,6 +25,9 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import type { AuthenticatedUser } from '../common/types/jwt-payload.type';
+import { BackgroundJobResponseDto } from '../jobs/dto/background-job-response.dto';
+import { QueuedJobResponseDto } from '../jobs/dto/queued-job-response.dto';
+import { JobStatusService } from '../jobs/job-status.service';
 import { AssignTicketDto } from './dto/assign-ticket.dto';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { ListTicketsQueryDto } from './dto/list-tickets-query.dto';
@@ -34,11 +39,15 @@ import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { TicketsService } from './tickets.service';
 
 @ApiTags('tickets')
+@ApiExtraModels(AiAnalysisResponseDto, QueuedJobResponseDto)
 @ApiBearerAuth('access-token')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('tickets')
 export class TicketsController {
-  constructor(private readonly ticketsService: TicketsService) {}
+  constructor(
+    private readonly ticketsService: TicketsService,
+    private readonly jobStatusService: JobStatusService,
+  ) {}
 
   @Post()
   @Roles(Role.USER, Role.SUPPORT_AGENT, Role.ADMIN)
@@ -71,6 +80,17 @@ export class TicketsController {
     @Param('id', new ParseUUIDPipe()) id: string,
   ): Promise<TicketDetailResponseDto> {
     return this.ticketsService.findByIdForUser(user, id);
+  }
+
+  @Get(':id/jobs')
+  @Roles(Role.USER, Role.SUPPORT_AGENT, Role.ADMIN)
+  @ApiOperation({ summary: 'List background jobs for a ticket' })
+  @ApiOkResponse({ type: BackgroundJobResponseDto, isArray: true })
+  listTicketJobs(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ): Promise<BackgroundJobResponseDto[]> {
+    return this.jobStatusService.listTicketJobsForUser(user, id);
   }
 
   @Patch(':id/status')
@@ -129,11 +149,18 @@ export class TicketsController {
   @Post(':id/ai/analyze')
   @Roles(Role.USER, Role.SUPPORT_AGENT, Role.ADMIN)
   @ApiOperation({ summary: 'Run AI analysis for a ticket' })
-  @ApiCreatedResponse({ type: AiAnalysisResponseDto })
+  @ApiCreatedResponse({
+    schema: {
+      oneOf: [
+        { $ref: getSchemaPath(AiAnalysisResponseDto) },
+        { $ref: getSchemaPath(QueuedJobResponseDto) },
+      ],
+    },
+  })
   analyzeTicket(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id', new ParseUUIDPipe()) id: string,
-  ): Promise<AiAnalysisResponseDto> {
+  ): Promise<AiAnalysisResponseDto | QueuedJobResponseDto> {
     return this.ticketsService.analyzeTicket(user, id);
   }
 

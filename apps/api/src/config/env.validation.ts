@@ -12,6 +12,10 @@ export interface AppEnv {
   OPENAI_MODEL: string;
   OPENAI_TIMEOUT_SECONDS: number;
   OPENAI_MAX_RETRIES: number;
+  QUEUE_MODE: 'sync' | 'async';
+  BULLMQ_REDIS_URL: string;
+  BULLMQ_DEFAULT_ATTEMPTS: number;
+  BULLMQ_BACKOFF_MS: number;
 }
 
 const requiredVars: Array<keyof Omit<AppEnv, 'PORT'>> = [
@@ -72,6 +76,17 @@ export function validateEnv(config: Record<string, unknown>): AppEnv {
       : 'gpt-4o-mini';
   const openaiTimeoutSeconds = Number(config.OPENAI_TIMEOUT_SECONDS ?? 20);
   const openaiMaxRetries = Number(config.OPENAI_MAX_RETRIES ?? 1);
+  const queueMode =
+    typeof config.QUEUE_MODE === 'string' && config.QUEUE_MODE.trim().length > 0
+      ? config.QUEUE_MODE.trim().toLowerCase()
+      : 'async';
+  const bullmqRedisUrl =
+    typeof config.BULLMQ_REDIS_URL === 'string' &&
+    config.BULLMQ_REDIS_URL.trim().length > 0
+      ? config.BULLMQ_REDIS_URL.trim()
+      : getRequiredEnv('REDIS_URL', config.REDIS_URL);
+  const bullmqDefaultAttempts = Number(config.BULLMQ_DEFAULT_ATTEMPTS ?? 3);
+  const bullmqBackoffMs = Number(config.BULLMQ_BACKOFF_MS ?? 5000);
 
   if (!Number.isFinite(openaiTimeoutSeconds) || openaiTimeoutSeconds <= 0) {
     throw new Error(
@@ -95,6 +110,26 @@ export function validateEnv(config: Record<string, unknown>): AppEnv {
     );
   }
 
+  if (queueMode !== 'sync' && queueMode !== 'async') {
+    throw new Error('Environment variable QUEUE_MODE must be sync or async');
+  }
+
+  if (
+    !Number.isInteger(bullmqDefaultAttempts) ||
+    bullmqDefaultAttempts <= 0 ||
+    bullmqDefaultAttempts > 10
+  ) {
+    throw new Error(
+      'Environment variable BULLMQ_DEFAULT_ATTEMPTS must be an integer between 1 and 10',
+    );
+  }
+
+  if (!Number.isInteger(bullmqBackoffMs) || bullmqBackoffMs < 0) {
+    throw new Error(
+      'Environment variable BULLMQ_BACKOFF_MS must be an integer greater than or equal to 0',
+    );
+  }
+
   return {
     NODE_ENV: getRequiredEnv('NODE_ENV', config.NODE_ENV),
     PORT: port,
@@ -115,5 +150,9 @@ export function validateEnv(config: Record<string, unknown>): AppEnv {
     OPENAI_MODEL: openaiModel,
     OPENAI_TIMEOUT_SECONDS: openaiTimeoutSeconds,
     OPENAI_MAX_RETRIES: openaiMaxRetries,
+    QUEUE_MODE: queueMode,
+    BULLMQ_REDIS_URL: bullmqRedisUrl,
+    BULLMQ_DEFAULT_ATTEMPTS: bullmqDefaultAttempts,
+    BULLMQ_BACKOFF_MS: bullmqBackoffMs,
   };
 }

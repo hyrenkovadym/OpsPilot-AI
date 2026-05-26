@@ -77,6 +77,40 @@ export interface TicketAiSuggestion {
   contextSources?: AiContextSource[] | null;
 }
 
+export type BackgroundJobStatus =
+  | 'QUEUED'
+  | 'PROCESSING'
+  | 'COMPLETED'
+  | 'FAILED';
+
+export type BackgroundJobType =
+  | 'TICKET_AI_ANALYSIS'
+  | 'KNOWLEDGE_BASE_RECHUNK';
+
+export interface QueuedJobResponse {
+  jobId: string;
+  entityType: string;
+  entityId: string;
+  status: BackgroundJobStatus;
+  queueName: string;
+  jobName: string;
+  message: string;
+}
+
+export interface BackgroundJob {
+  id: string;
+  type: BackgroundJobType;
+  status: BackgroundJobStatus;
+  entityType: string;
+  entityId: string;
+  attempts: number;
+  lastError: string | null;
+  metadata: unknown;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
 export interface TicketsListResponse {
   data: TicketDetail[];
   meta: {
@@ -343,8 +377,8 @@ export async function updateTicketPriority(
 export async function analyzeTicket(
   token: string,
   id: string,
-): Promise<TicketAiSuggestion> {
-  return requestJson<TicketAiSuggestion>(
+): Promise<TicketAiSuggestion | QueuedJobResponse> {
+  return requestJson<TicketAiSuggestion | QueuedJobResponse>(
     `/tickets/${id}/ai/analyze`,
     {
       method: 'POST',
@@ -362,6 +396,24 @@ export async function getTicketAiSuggestion(
     {
       method: 'GET',
     },
+    token,
+  );
+}
+
+export async function getJob(
+  token: string,
+  jobId: string,
+): Promise<BackgroundJob> {
+  return requestJson<BackgroundJob>(`/jobs/${jobId}`, { method: 'GET' }, token);
+}
+
+export async function listTicketJobs(
+  token: string,
+  ticketId: string,
+): Promise<BackgroundJob[]> {
+  return requestJson<BackgroundJob[]>(
+    `/tickets/${ticketId}/jobs`,
+    { method: 'GET' },
     token,
   );
 }
@@ -470,13 +522,27 @@ export async function archiveKnowledgeArticle(
 export async function rechunkKnowledgeArticle(
   token: string,
   id: string,
-): Promise<KnowledgeArticle> {
-  return requestJson<KnowledgeArticle>(
+): Promise<KnowledgeArticle | QueuedJobResponse> {
+  return requestJson<KnowledgeArticle | QueuedJobResponse>(
     `/knowledge-base/articles/${id}/rechunk`,
     {
       method: 'POST',
     },
     token,
+  );
+}
+
+export function isQueuedJobResponse(
+  value: unknown,
+): value is QueuedJobResponse {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.jobId === 'string' &&
+    typeof record.status === 'string' &&
+    typeof record.queueName === 'string'
   );
 }
 

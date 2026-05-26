@@ -26,4 +26,12 @@ export default () => ({
       maxRetries: Number(process.env.OPENAI_MAX_RETRIES ?? 1),
     },
   },
+  queue: {
+    mode: process.env.QUEUE_MODE ?? 'async',
+    bullmq: {
+      redisUrl: process.env.BULLMQ_REDIS_URL ?? process.env.REDIS_URL,
+      defaultAttempts: Number(process.env.BULLMQ_DEFAULT_ATTEMPTS ?? 3),
+      backoffMs: Number(process.env.BULLMQ_BACKOFF_MS ?? 5000),
+    },
+  },
 });

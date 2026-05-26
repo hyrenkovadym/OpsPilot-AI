@@ -1,4 +1,4 @@
-# OpsPilot AI Architecture (Phase 4)
+# OpsPilot AI Architecture (Phase 5)
 
 ## Monorepo
 - `apps/api`: NestJS backend
@@ -14,6 +14,8 @@
 - `tickets`: ticket lifecycle + AI endpoints
 - `ai`: provider abstraction (`mock`, optional `openai`)
 - `knowledge-base`: article CRUD, chunking, retrieval
+- `jobs`: queue orchestration, job records, job status endpoints
+- `workers`: BullMQ processors for ticket AI and KB rechunk
 - `audit`: centralized audit log service
 - `health`: health/readiness
 - `common`: guards, decorators, auth types
@@ -29,6 +31,9 @@ Core models:
 Knowledge models:
 - `KnowledgeBaseArticle`
 - `KnowledgeBaseChunk`
+
+Job model:
+- `BackgroundJob`
 
 Ticket AI fields:
 - `aiSummary`
@@ -78,10 +83,12 @@ No external embedding/vector dependency yet; JSON embedding placeholders are kep
 ## AI Integration Flow
 1. Ticket AI analyze endpoint loads ticket
 2. Retrieval fetches top published KB chunks for ticket context
-3. Provider receives ticket + optional context chunks
-4. Output is schema-validated
-5. Ticket AI fields and context sources are persisted
-6. Audit events capture retrieval/analyze/failure paths
+3. In `QUEUE_MODE=async`, API creates/enqueues `BackgroundJob`; worker performs processing
+4. In `QUEUE_MODE=sync`, API performs processing directly
+5. Provider receives ticket + optional context chunks
+6. Output is schema-validated
+7. Ticket AI fields and context sources are persisted
+8. Audit events capture queue/retrieval/analyze/failure paths
 
 Provider behavior:
 - `MockAiProvider` default: deterministic, local/test safe
@@ -92,10 +99,30 @@ Provider behavior:
 - Ticket UI:
   - list/new/detail pages
   - AI analyze action and context display
+  - async job polling (`QUEUED`/`PROCESSING`/`COMPLETED`/`FAILED`)
 - Knowledge Base UI:
   - `/knowledge-base`
   - `/knowledge-base/new`
   - `/knowledge-base/[id]`
+  - async rechunk polling in article detail
+
+## Queue Architecture
+- Queue names:
+  - `ticket-ai`
+  - `knowledge-base`
+- Job names:
+  - `analyze-ticket`
+  - `rechunk-article`
+- Worker entrypoint:
+  - `apps/api/src/worker.ts`
+- Runtime modes:
+  - `QUEUE_MODE=async` (default)
+  - `QUEUE_MODE=sync` (fallback for deterministic tests/local flows)
+
+Retry/backoff configuration:
+- `BULLMQ_DEFAULT_ATTEMPTS`
+- `BULLMQ_BACKOFF_MS`
+- `BULLMQ_REDIS_URL`
 
 ## Security and Reliability
 - `AI_PROVIDER=mock` by default; no key required
@@ -104,4 +131,4 @@ Provider behavior:
 - audit metadata stores safe operational context only
 
 ## Forward Path
-Next planned upgrade is async orchestration with BullMQ (Phase 5), then real-time delivery with WebSockets (Phase 6).
+Next planned upgrade is real-time delivery with WebSockets/Socket.IO (Phase 6), then observability/security hardening.

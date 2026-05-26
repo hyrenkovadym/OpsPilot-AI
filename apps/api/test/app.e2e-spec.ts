@@ -2,6 +2,9 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import {
   AuditLog,
+  BackgroundJob,
+  BackgroundJobStatus,
+  BackgroundJobType,
   KnowledgeArticleStatus,
   KnowledgeBaseArticle,
   KnowledgeBaseChunk,
@@ -17,7 +20,10 @@ import { randomUUID } from 'crypto';
 import request from 'supertest';
 import { AiService } from '../src/ai/ai.service';
 import { AppModule } from '../src/app.module';
+import { JobsService } from '../src/jobs/jobs.service';
+import { KnowledgeBaseService } from '../src/knowledge-base/knowledge-base.service';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { TicketsService } from '../src/tickets/tickets.service';
 
 interface AuthPayload {
   accessToken: string;
@@ -72,6 +78,7 @@ class MockPrismaService {
   public readonly users: User[] = [];
   public readonly tickets: Ticket[] = [];
   public readonly auditLogs: AuditLog[] = [];
+  public readonly backgroundJobs: BackgroundJob[] = [];
   public readonly knowledgeArticles: KnowledgeBaseArticle[] = [];
   public readonly knowledgeChunks: KnowledgeBaseChunk[] = [];
 
@@ -632,6 +639,109 @@ class MockPrismaService {
     },
   };
 
+  public backgroundJob = {
+    create: async (args: {
+      data: {
+        type: BackgroundJobType;
+        status: BackgroundJobStatus;
+        entityType: string;
+        entityId: string;
+        attempts?: number;
+        metadata?: Prisma.JsonValue;
+      };
+    }): Promise<BackgroundJob> => {
+      const job: BackgroundJob = {
+        id: randomUUID(),
+        type: args.data.type,
+        status: args.data.status,
+        entityType: args.data.entityType,
+        entityId: args.data.entityId,
+        attempts: args.data.attempts ?? 0,
+        lastError: null,
+        metadata: args.data.metadata ?? null,
+        createdAt: new Date(),
+        startedAt: null,
+        finishedAt: null,
+      };
+      this.backgroundJobs.push(job);
+      return job;
+    },
+    update: async (args: {
+      where: { id: string };
+      data: {
+        status?: BackgroundJobStatus;
+        attempts?: number;
+        lastError?: string;
+        metadata?: Prisma.InputJsonValue;
+        startedAt?: Date;
+        finishedAt?: Date;
+      };
+    }): Promise<BackgroundJob> => {
+      const index = this.backgroundJobs.findIndex(
+        (item) => item.id === args.where.id,
+      );
+      if (index < 0) {
+        throw new Error('BackgroundJob not found in mock update');
+      }
+
+      const existing = this.backgroundJobs[index];
+      const updated: BackgroundJob = {
+        ...existing,
+        status: args.data.status ?? existing.status,
+        attempts: args.data.attempts ?? existing.attempts,
+        lastError:
+          args.data.lastError === undefined
+            ? existing.lastError
+            : args.data.lastError,
+        metadata:
+          args.data.metadata === undefined
+            ? existing.metadata
+            : (args.data.metadata as Prisma.JsonValue),
+        startedAt:
+          args.data.startedAt === undefined
+            ? existing.startedAt
+            : args.data.startedAt,
+        finishedAt:
+          args.data.finishedAt === undefined
+            ? existing.finishedAt
+            : args.data.finishedAt,
+      };
+      this.backgroundJobs[index] = updated;
+      return updated;
+    },
+    findUnique: async (args: {
+      where: { id: string };
+    }): Promise<BackgroundJob | null> => {
+      return (
+        this.backgroundJobs.find((item) => item.id === args.where.id) ?? null
+      );
+    },
+    findMany: async (args: {
+      where?: {
+        entityType?: string;
+        entityId?: string;
+      };
+      orderBy?: { createdAt: 'asc' | 'desc' };
+      take?: number;
+    }): Promise<BackgroundJob[]> => {
+      const filtered = this.backgroundJobs.filter((item) => {
+        if (args.where?.entityType && item.entityType !== args.where.entityType) {
+          return false;
+        }
+        if (args.where?.entityId && item.entityId !== args.where.entityId) {
+          return false;
+        }
+        return true;
+      });
+      const ordered = [...filtered].sort((a, b) =>
+        args.orderBy?.createdAt === 'asc'
+          ? a.createdAt.getTime() - b.createdAt.getTime()
+          : b.createdAt.getTime() - a.createdAt.getTime(),
+      );
+      return ordered.slice(0, args.take ?? ordered.length);
+    },
+  };
+
   public async $queryRaw(
     _query: TemplateStringsArray,
   ): Promise<Array<{ ok: number }>> {
@@ -651,6 +761,9 @@ describe('OpsPilot API Phase 3 (e2e)', () => {
   let app: INestApplication;
   let mockPrisma: MockPrismaService;
   let aiService: AiService;
+  let jobsService: JobsService;
+  let ticketsService: TicketsService;
+  let knowledgeBaseService: KnowledgeBaseService;
 
   beforeAll(async () => {
     mockPrisma = new MockPrismaService();
@@ -673,6 +786,9 @@ describe('OpsPilot API Phase 3 (e2e)', () => {
     );
     await app.init();
     aiService = app.get(AiService);
+    jobsService = app.get(JobsService);
+    ticketsService = app.get(TicketsService);
+    knowledgeBaseService = app.get(KnowledgeBaseService);
   });
 
   afterAll(async () => {
@@ -1393,6 +1509,372 @@ describe('OpsPilot API Phase 3 (e2e)', () => {
       (entry) => entry.action === 'ticket_ai_context_retrieved',
     );
     expect(contextLogs.length).toBeGreaterThan(0);
+  });
+
+  it('QUEUE_MODE=sync preserves direct AI analysis response', async () => {
+    const modeSpy = jest.spyOn(jobsService, 'isAsyncMode').mockReturnValue(false);
+    const user = await register('sync.ai.user@company.com', 'Sync AI User');
+    const created = await createTicket(user.accessToken, {
+      title: 'sync mode analysis',
+      description: 'Need direct synchronous analysis result.',
+      category: 'IT',
+      priority: 'LOW',
+    });
+
+    const response = await request(app.getHttpServer())
+      .post(`/api/tickets/${created.body.id as string}/ai/analyze`)
+      .set('Authorization', `Bearer ${user.accessToken}`)
+      .expect(201);
+
+    expect(response.body.category).toBeTruthy();
+    expect(response.body.provider).toBe('mock');
+    modeSpy.mockRestore();
+  });
+
+  it('QUEUE_MODE=async returns queued response and creates BackgroundJob', async () => {
+    const modeSpy = jest.spyOn(jobsService, 'isAsyncMode').mockReturnValue(true);
+    const user = await register('async.ai.user@company.com', 'Async AI User');
+    const created = await createTicket(user.accessToken, {
+      title: 'async mode analysis',
+      description: 'Should queue analysis job.',
+      category: 'IT',
+      priority: 'MEDIUM',
+    });
+
+    const response = await request(app.getHttpServer())
+      .post(`/api/tickets/${created.body.id as string}/ai/analyze`)
+      .set('Authorization', `Bearer ${user.accessToken}`)
+      .expect(201);
+
+    expect(response.body.status).toBe('QUEUED');
+    expect(response.body.jobId).toBeTruthy();
+
+    const queuedJob = mockPrisma.backgroundJobs.find(
+      (item) => item.id === (response.body.jobId as string),
+    );
+    expect(queuedJob?.type).toBe(BackgroundJobType.TICKET_AI_ANALYSIS);
+    modeSpy.mockRestore();
+  });
+
+  it('user cannot enqueue AI analysis for another user ticket in async mode', async () => {
+    const modeSpy = jest.spyOn(jobsService, 'isAsyncMode').mockReturnValue(true);
+    const owner = await register('async.owner@company.com', 'Async Owner');
+    const outsider = await register(
+      'async.outsider@company.com',
+      'Async Outsider',
+    );
+    const created = await createTicket(owner.accessToken, {
+      title: 'private async ticket',
+      description: 'Outsider should not queue this ticket.',
+      category: 'OTHER',
+      priority: 'LOW',
+    });
+
+    await request(app.getHttpServer())
+      .post(`/api/tickets/${created.body.id as string}/ai/analyze`)
+      .set('Authorization', `Bearer ${outsider.accessToken}`)
+      .expect(404);
+
+    modeSpy.mockRestore();
+  });
+
+  it('support agent can enqueue AI analysis for any ticket in async mode', async () => {
+    const modeSpy = jest.spyOn(jobsService, 'isAsyncMode').mockReturnValue(true);
+    const owner = await register('async.owner2@company.com', 'Async Owner 2');
+    const support = await register(
+      'async.support@company.com',
+      'Async Support Agent',
+    );
+    setRole(support.user.email, Role.SUPPORT_AGENT);
+    const supportLogin = await login('async.support@company.com');
+
+    const created = await createTicket(owner.accessToken, {
+      title: 'support enqueue ticket',
+      description: 'Support should queue this ticket.',
+      category: 'IT',
+      priority: 'MEDIUM',
+    });
+
+    const response = await request(app.getHttpServer())
+      .post(`/api/tickets/${created.body.id as string}/ai/analyze`)
+      .set('Authorization', `Bearer ${supportLogin.accessToken}`)
+      .expect(201);
+
+    expect(response.body.status).toBe('QUEUED');
+    modeSpy.mockRestore();
+  });
+
+  it('job status endpoint returns job for authorized user', async () => {
+    const modeSpy = jest.spyOn(jobsService, 'isAsyncMode').mockReturnValue(true);
+    const user = await register('job.status.user@company.com', 'Job Status User');
+    const created = await createTicket(user.accessToken, {
+      title: 'job status ticket',
+      description: 'Job status visibility for owner.',
+      category: 'OTHER',
+      priority: 'LOW',
+    });
+
+    const queued = await request(app.getHttpServer())
+      .post(`/api/tickets/${created.body.id as string}/ai/analyze`)
+      .set('Authorization', `Bearer ${user.accessToken}`)
+      .expect(201);
+
+    const jobId = queued.body.jobId as string;
+    const response = await request(app.getHttpServer())
+      .get(`/api/jobs/${jobId}`)
+      .set('Authorization', `Bearer ${user.accessToken}`)
+      .expect(200);
+
+    expect(response.body.id).toBe(jobId);
+    expect(response.body.entityId).toBe(created.body.id as string);
+    modeSpy.mockRestore();
+  });
+
+  it('unauthorized user cannot read another user job', async () => {
+    const modeSpy = jest.spyOn(jobsService, 'isAsyncMode').mockReturnValue(true);
+    const owner = await register('job.owner@company.com', 'Job Owner');
+    const outsider = await register('job.outsider@company.com', 'Job Outsider');
+
+    const created = await createTicket(owner.accessToken, {
+      title: 'private job ticket',
+      description: 'Outsider cannot access related job.',
+      category: 'OTHER',
+      priority: 'LOW',
+    });
+
+    const queued = await request(app.getHttpServer())
+      .post(`/api/tickets/${created.body.id as string}/ai/analyze`)
+      .set('Authorization', `Bearer ${owner.accessToken}`)
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .get(`/api/jobs/${queued.body.jobId as string}`)
+      .set('Authorization', `Bearer ${outsider.accessToken}`)
+      .expect(404);
+
+    modeSpy.mockRestore();
+  });
+
+  it('worker-like processing updates queued AI job and ticket', async () => {
+    const modeSpy = jest.spyOn(jobsService, 'isAsyncMode').mockReturnValue(true);
+    const user = await register('worker.ai.user@company.com', 'Worker AI User');
+    const created = await createTicket(user.accessToken, {
+      title: 'worker processing ticket',
+      description: 'This should be processed by worker-like flow.',
+      category: 'IT',
+      priority: 'LOW',
+    });
+
+    const queued = await request(app.getHttpServer())
+      .post(`/api/tickets/${created.body.id as string}/ai/analyze`)
+      .set('Authorization', `Bearer ${user.accessToken}`)
+      .expect(201);
+
+    const jobId = queued.body.jobId as string;
+    await jobsService.markProcessing({ jobId, attempts: 1 });
+    await ticketsService.analyzeTicketForJob({
+      ticketId: created.body.id as string,
+      actorId: user.user.id,
+      backgroundJobId: jobId,
+      queueName: 'ticket-ai',
+      jobName: 'analyze-ticket',
+    });
+    await jobsService.markCompleted({
+      jobId,
+      attempts: 1,
+      metadata: { durationMs: 1 },
+    });
+
+    const updatedTicket = mockPrisma.tickets.find(
+      (item) => item.id === (created.body.id as string),
+    );
+    expect(updatedTicket?.aiSummary).toBeTruthy();
+    expect(updatedTicket?.aiConfidence).not.toBeNull();
+
+    const updatedJob = mockPrisma.backgroundJobs.find((item) => item.id === jobId);
+    expect(updatedJob?.status).toBe(BackgroundJobStatus.COMPLETED);
+    modeSpy.mockRestore();
+  });
+
+  it('failed AI worker path marks background job as FAILED', async () => {
+    const modeSpy = jest.spyOn(jobsService, 'isAsyncMode').mockReturnValue(true);
+    const user = await register('worker.fail.user@company.com', 'Worker Fail User');
+    const created = await createTicket(user.accessToken, {
+      title: 'worker failure ticket',
+      description: 'Worker should mark this job as failed.',
+      category: 'OTHER',
+      priority: 'LOW',
+    });
+
+    const queued = await request(app.getHttpServer())
+      .post(`/api/tickets/${created.body.id as string}/ai/analyze`)
+      .set('Authorization', `Bearer ${user.accessToken}`)
+      .expect(201);
+
+    const jobId = queued.body.jobId as string;
+    const analyzeSpy = jest
+      .spyOn(aiService, 'analyzeTicket')
+      .mockRejectedValueOnce(new Error('worker provider down'));
+
+    await jobsService.markProcessing({ jobId, attempts: 1 });
+    await expect(
+      ticketsService.analyzeTicketForJob({
+        ticketId: created.body.id as string,
+        actorId: user.user.id,
+        backgroundJobId: jobId,
+        queueName: 'ticket-ai',
+        jobName: 'analyze-ticket',
+      }),
+    ).rejects.toThrow();
+    await jobsService.markFailed({
+      jobId,
+      attempts: 1,
+      reason: 'worker provider down',
+    });
+    analyzeSpy.mockRestore();
+
+    const failedJob = mockPrisma.backgroundJobs.find((item) => item.id === jobId);
+    expect(failedJob?.status).toBe(BackgroundJobStatus.FAILED);
+    modeSpy.mockRestore();
+  });
+
+  it('support agent can enqueue article rechunk in async mode', async () => {
+    const modeSpy = jest.spyOn(jobsService, 'isAsyncMode').mockReturnValue(true);
+    const support = await register('rechunk.agent@company.com', 'Rechunk Agent');
+    setRole(support.user.email, Role.SUPPORT_AGENT);
+    const supportLogin = await login('rechunk.agent@company.com');
+
+    const article = await request(app.getHttpServer())
+      .post('/api/knowledge-base/articles')
+      .set('Authorization', `Bearer ${supportLogin.accessToken}`)
+      .send({
+        title: 'Rechunk async article',
+        content: 'This article will be rechunked asynchronously.',
+        category: 'IT',
+      })
+      .expect(201);
+
+    const queued = await request(app.getHttpServer())
+      .post(`/api/knowledge-base/articles/${article.body.id as string}/rechunk`)
+      .set('Authorization', `Bearer ${supportLogin.accessToken}`)
+      .expect(201);
+
+    expect(queued.body.status).toBe('QUEUED');
+    modeSpy.mockRestore();
+  });
+
+  it('user cannot enqueue article rechunk in async mode', async () => {
+    const modeSpy = jest.spyOn(jobsService, 'isAsyncMode').mockReturnValue(true);
+    const support = await register('rechunk.owner@company.com', 'Rechunk Owner');
+    setRole(support.user.email, Role.SUPPORT_AGENT);
+    const supportLogin = await login('rechunk.owner@company.com');
+    const user = await register('rechunk.user@company.com', 'Rechunk User');
+
+    const article = await request(app.getHttpServer())
+      .post('/api/knowledge-base/articles')
+      .set('Authorization', `Bearer ${supportLogin.accessToken}`)
+      .send({
+        title: 'Rechunk owner article',
+        content: 'Only support/admin can rechunk this.',
+        category: 'IT',
+      })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post(`/api/knowledge-base/articles/${article.body.id as string}/rechunk`)
+      .set('Authorization', `Bearer ${user.accessToken}`)
+      .expect(403);
+
+    modeSpy.mockRestore();
+  });
+
+  it('worker-like rechunk flow completes and preserves chunks', async () => {
+    const modeSpy = jest.spyOn(jobsService, 'isAsyncMode').mockReturnValue(true);
+    const support = await register(
+      'worker.rechunk.agent@company.com',
+      'Worker Rechunk Agent',
+    );
+    setRole(support.user.email, Role.SUPPORT_AGENT);
+    const supportLogin = await login('worker.rechunk.agent@company.com');
+
+    const article = await request(app.getHttpServer())
+      .post('/api/knowledge-base/articles')
+      .set('Authorization', `Bearer ${supportLogin.accessToken}`)
+      .send({
+        title: 'Worker rechunk flow article',
+        content:
+          'Line one for chunking.\nLine two for chunking.\nLine three for chunking.',
+        category: 'OPERATIONS',
+      })
+      .expect(201);
+
+    const queued = await request(app.getHttpServer())
+      .post(`/api/knowledge-base/articles/${article.body.id as string}/rechunk`)
+      .set('Authorization', `Bearer ${supportLogin.accessToken}`)
+      .expect(201);
+
+    const jobId = queued.body.jobId as string;
+    await jobsService.markProcessing({ jobId, attempts: 1 });
+    await knowledgeBaseService.rechunkArticleForJob({
+      articleId: article.body.id as string,
+      actorId: support.user.id,
+      backgroundJobId: jobId,
+      queueName: 'knowledge-base',
+      jobName: 'rechunk-article',
+    });
+    await jobsService.markCompleted({
+      jobId,
+      attempts: 1,
+      metadata: { durationMs: 1 },
+    });
+
+    const updatedArticle = mockPrisma.knowledgeArticles.find(
+      (item) => item.id === (article.body.id as string),
+    );
+    const chunks = mockPrisma.knowledgeChunks.filter(
+      (item) => item.articleId === (article.body.id as string),
+    );
+    expect(updatedArticle).toBeTruthy();
+    expect(chunks.length).toBeGreaterThan(0);
+    expect(
+      mockPrisma.backgroundJobs.find((item) => item.id === jobId)?.status,
+    ).toBe(BackgroundJobStatus.COMPLETED);
+    modeSpy.mockRestore();
+  });
+
+  it('failed rechunk worker path marks job as FAILED', async () => {
+    const modeSpy = jest.spyOn(jobsService, 'isAsyncMode').mockReturnValue(true);
+    const support = await register(
+      'worker.rechunk.fail@company.com',
+      'Worker Rechunk Fail',
+    );
+    setRole(support.user.email, Role.SUPPORT_AGENT);
+
+    const queued = await jobsService.enqueueKnowledgeRechunk({
+      actorId: support.user.id,
+      articleId: randomUUID(),
+    });
+
+    await jobsService.markProcessing({ jobId: queued.jobId, attempts: 1 });
+    await expect(
+      knowledgeBaseService.rechunkArticleForJob({
+        articleId: queued.entityId,
+        actorId: support.user.id,
+        backgroundJobId: queued.jobId,
+        queueName: 'knowledge-base',
+        jobName: 'rechunk-article',
+      }),
+    ).rejects.toThrow();
+    await jobsService.markFailed({
+      jobId: queued.jobId,
+      attempts: 1,
+      reason: 'Knowledge article not found',
+    });
+
+    expect(
+      mockPrisma.backgroundJobs.find((item) => item.id === queued.jobId)?.status,
+    ).toBe(BackgroundJobStatus.FAILED);
+    modeSpy.mockRestore();
   });
 
   async function register(

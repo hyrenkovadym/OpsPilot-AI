@@ -9,6 +9,8 @@ import { AiAnalysisResponseDto } from '../ai/dto/ai-analysis-response.dto';
 import { AiService } from '../ai/ai.service';
 import { AuditService } from '../audit/audit.service';
 import type { AuthenticatedUser } from '../common/types/jwt-payload.type';
+import { QueuedJobResponseDto } from '../jobs/dto/queued-job-response.dto';
+import { JobsService } from '../jobs/jobs.service';
 import { RetrievalService } from '../knowledge-base/retrieval.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AssignTicketDto } from './dto/assign-ticket.dto';
@@ -54,6 +56,7 @@ export class TicketsService {
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
     private readonly aiService: AiService,
+    private readonly jobsService: JobsService,
     private readonly retrievalService: RetrievalService,
   ) {}
 
@@ -295,9 +298,62 @@ export class TicketsService {
   async analyzeTicket(
     user: AuthenticatedUser,
     id: string,
-  ): Promise<AiAnalysisResponseDto> {
+  ): Promise<AiAnalysisResponseDto | QueuedJobResponseDto> {
     const existing = await this.getTicketWithUsers(id);
     this.assertCanViewTicket(user, existing.createdById);
+
+    if (this.jobsService.isAsyncMode()) {
+      return this.jobsService.enqueueTicketAiAnalysis({
+        actorId: user.sub,
+        ticketId: id,
+      });
+    }
+
+    return this.analyzeTicketSync({
+      ticket: existing,
+      actorId: user.sub,
+    });
+  }
+
+  async analyzeTicketForJob(input: {
+    ticketId: string;
+    actorId: string;
+    backgroundJobId: string;
+    queueName: string;
+    jobName: string;
+  }): Promise<AiAnalysisResponseDto> {
+    const ticket = await this.getTicketWithUsers(input.ticketId);
+
+    await this.auditService.log({
+      actorId: input.actorId,
+      action: 'ticket_ai_analysis_started',
+      entityType: 'ticket',
+      entityId: ticket.id,
+      metadata: {
+        jobId: input.backgroundJobId,
+        queueName: input.queueName,
+        jobName: input.jobName,
+        status: 'PROCESSING',
+      },
+    });
+
+    return this.analyzeTicketSync({
+      ticket,
+      actorId: input.actorId,
+      backgroundJobId: input.backgroundJobId,
+      queueName: input.queueName,
+      jobName: input.jobName,
+    });
+  }
+
+  private async analyzeTicketSync(input: {
+    ticket: TicketWithUsers;
+    actorId: string;
+    backgroundJobId?: string;
+    queueName?: string;
+    jobName?: string;
+  }): Promise<AiAnalysisResponseDto> {
+    const existing = input.ticket;
 
     const previousCategory = existing.category;
     const previousPriority = existing.priority;
@@ -313,12 +369,15 @@ export class TicketsService {
       const contextSources = this.mapContextSources(contextChunks);
 
       await this.auditService.log({
-        actorId: user.sub,
+        actorId: input.actorId,
         action: 'ticket_ai_context_retrieved',
         entityType: 'ticket',
-        entityId: id,
+        entityId: existing.id,
         metadata: {
-          ticketId: id,
+          jobId: input.backgroundJobId ?? null,
+          queueName: input.queueName ?? null,
+          jobName: input.jobName ?? null,
+          ticketId: existing.id,
           retrievedCount: contextChunks.length,
           sourceArticleIds: Array.from(
             new Set(contextChunks.map((item) => item.articleId)),
@@ -339,7 +398,7 @@ export class TicketsService {
       );
 
       await this.prisma.ticket.update({
-        where: { id },
+        where: { id: existing.id },
         data: {
           category: analysis.category,
           priority: analysis.priority,
@@ -351,11 +410,14 @@ export class TicketsService {
       });
 
       await this.auditService.log({
-        actorId: user.sub,
+        actorId: input.actorId,
         action: 'ticket_ai_analyzed',
         entityType: 'ticket',
-        entityId: id,
+        entityId: existing.id,
         metadata: {
+          jobId: input.backgroundJobId ?? null,
+          queueName: input.queueName ?? null,
+          jobName: input.jobName ?? null,
           provider,
           confidence: analysis.aiConfidence,
           previousCategory,
@@ -373,11 +435,14 @@ export class TicketsService {
       );
     } catch (error) {
       await this.auditService.log({
-        actorId: user.sub,
+        actorId: input.actorId,
         action: 'ticket_ai_analysis_failed',
         entityType: 'ticket',
-        entityId: id,
+        entityId: existing.id,
         metadata: {
+          jobId: input.backgroundJobId ?? null,
+          queueName: input.queueName ?? null,
+          jobName: input.jobName ?? null,
           provider,
           previousCategory,
           previousPriority,

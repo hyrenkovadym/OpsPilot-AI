@@ -54,9 +54,44 @@ services:
       OPENAI_MODEL: gpt-4o-mini
       OPENAI_TIMEOUT_SECONDS: 20
       OPENAI_MAX_RETRIES: 1
+      QUEUE_MODE: async
+      BULLMQ_REDIS_URL: redis://redis:6379
+      BULLMQ_DEFAULT_ATTEMPTS: 3
+      BULLMQ_BACKOFF_MS: 5000
     command: sh -c "npx prisma db push && node dist/main.js"
     ports:
       - '4000:4000'
+
+  worker:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    container_name: opspilot-worker
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      PORT: 4000
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/opspilot
+      REDIS_URL: redis://redis:6379
+      JWT_ACCESS_SECRET: dev-access-secret-change-me
+      JWT_REFRESH_SECRET: dev-refresh-secret-change-me
+      CORS_ORIGIN: http://localhost:3000
+      AI_PROVIDER: mock
+      OPENAI_API_KEY: ''
+      OPENAI_BASE_URL: https://api.openai.com/v1
+      OPENAI_MODEL: gpt-4o-mini
+      OPENAI_TIMEOUT_SECONDS: 20
+      OPENAI_MAX_RETRIES: 1
+      QUEUE_MODE: async
+      BULLMQ_REDIS_URL: redis://redis:6379
+      BULLMQ_DEFAULT_ATTEMPTS: 3
+      BULLMQ_BACKOFF_MS: 5000
+    command: sh -c "npx prisma db push && node dist/worker.js"
 
   web:
     build:
@@ -66,6 +101,7 @@ services:
     restart: unless-stopped
     depends_on:
       - api
+      - worker
     environment:
       NODE_ENV: development
     ports:

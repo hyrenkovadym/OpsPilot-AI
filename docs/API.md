@@ -1,4 +1,4 @@
-# OpsPilot AI API (Phase 4)
+# OpsPilot AI API (Phase 5)
 
 Base URL: `http://localhost:4000/api`  
 Swagger: `http://localhost:4000/api/docs`
@@ -47,10 +47,13 @@ All ticket endpoints require `Bearer <accessToken>`.
 
 - `POST /tickets/:id/ai/analyze`
 - `GET /tickets/:id/ai/suggestion`
+- `GET /tickets/:id/jobs`
 
 ### Behavior
 - Uses configured provider (`mock` by default)
 - Retrieves relevant published KB chunks before analysis
+- In `QUEUE_MODE=async`, analyze returns queued job info and worker completes processing
+- In `QUEUE_MODE=sync`, analyze runs immediately in the API process
 - Updates ticket with:
   - `category`
   - `priority`
@@ -75,6 +78,17 @@ All ticket endpoints require `Bearer <accessToken>`.
       "score": 12
     }
   ]
+}
+```
+
+### Queued Response (async mode)
+```json
+{
+  "jobId": "uuid",
+  "entityId": "ticket-uuid",
+  "entityType": "ticket",
+  "status": "QUEUED",
+  "message": "Ticket AI analysis has been queued."
 }
 ```
 
@@ -129,6 +143,27 @@ Prefix: `/knowledge-base`
 - `chunkContent`
 - `score`
 
+### Rechunk Behavior
+- In `QUEUE_MODE=async`, rechunk returns queued job info
+- In `QUEUE_MODE=sync`, rechunk is processed immediately
+
+## Jobs
+
+All jobs endpoints require `Bearer <accessToken>`.
+
+- `GET /jobs/:id`
+- `GET /jobs/tickets/:ticketId`
+
+### Job Status Values
+- `QUEUED`
+- `PROCESSING`
+- `COMPLETED`
+- `FAILED`
+
+### Job Types
+- `TICKET_AI_ANALYSIS`
+- `KNOWLEDGE_BASE_RECHUNK`
+
 ## AI Provider Modes
 - `AI_PROVIDER=mock` (default, deterministic, no network)
 - `AI_PROVIDER=openai` (optional)
@@ -139,6 +174,15 @@ OpenAI-compatible mode uses:
 - `OPENAI_MODEL`
 - `OPENAI_TIMEOUT_SECONDS`
 - `OPENAI_MAX_RETRIES`
+
+## Queue Mode
+- `QUEUE_MODE=async` (default): API enqueues work to BullMQ worker
+- `QUEUE_MODE=sync`: API executes analysis/rechunk synchronously
+
+BullMQ environment:
+- `BULLMQ_REDIS_URL`
+- `BULLMQ_DEFAULT_ATTEMPTS`
+- `BULLMQ_BACKOFF_MS`
 
 ## Audit Events
 
@@ -155,6 +199,8 @@ Ticket/auth:
 - `ticket_ai_analyzed`
 - `ticket_ai_analysis_failed`
 - `ticket_ai_context_retrieved`
+- `ticket_ai_analysis_queued`
+- `ticket_ai_analysis_started`
 
 Knowledge base:
 - `knowledge_article_created`
@@ -163,6 +209,9 @@ Knowledge base:
 - `knowledge_article_archived`
 - `knowledge_article_deleted`
 - `knowledge_article_rechunked`
+- `knowledge_article_rechunk_queued`
+- `knowledge_article_rechunk_started`
+- `knowledge_article_rechunk_failed`
 - `knowledge_search_performed`
 
 Audit metadata excludes secrets and API keys.
