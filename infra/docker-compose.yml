@@ -58,6 +58,8 @@ services:
       BULLMQ_REDIS_URL: redis://redis:6379
       BULLMQ_DEFAULT_ATTEMPTS: 3
       BULLMQ_BACKOFF_MS: 5000
+      REALTIME_ENABLED: true
+      SOCKET_CORS_ORIGIN: http://localhost:3000
     command: sh -c "npx prisma db push && node dist/main.js"
     ports:
       - '4000:4000'
@@ -91,6 +93,8 @@ services:
       BULLMQ_REDIS_URL: redis://redis:6379
       BULLMQ_DEFAULT_ATTEMPTS: 3
       BULLMQ_BACKOFF_MS: 5000
+      REALTIME_ENABLED: true
+      SOCKET_CORS_ORIGIN: http://localhost:3000
     command: sh -c "npx prisma db push && node dist/worker.js"
 
   web:

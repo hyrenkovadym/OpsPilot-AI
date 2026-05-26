@@ -34,4 +34,13 @@ export default () => ({
       backoffMs: Number(process.env.BULLMQ_BACKOFF_MS ?? 5000),
     },
   },
+  realtime: {
+    enabled: process.env.REALTIME_ENABLED
+      ? process.env.REALTIME_ENABLED.toLowerCase() !== 'false'
+      : true,
+    corsOrigin:
+      process.env.SOCKET_CORS_ORIGIN ??
+      process.env.CORS_ORIGIN ??
+      'http://localhost:3000',
+  },
 });

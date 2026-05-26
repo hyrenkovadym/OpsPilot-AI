@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
@@ -10,13 +10,15 @@ import {
   listTickets,
   type TicketDetail,
 } from '@/lib/api';
+import { connectRealtime, onRealtimeEvent } from '@/lib/realtime';
 
 export default function DashboardPage() {
   const [tickets, setTickets] = useState<TicketDetail[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [realtimeHint, setRealtimeHint] = useState<string | null>(null);
 
-  useEffect(() => {
+  async function loadDashboardTickets(): Promise<void> {
     const token = getAccessToken();
     if (!token) {
       setError('Please login to view dashboard metrics.');
@@ -25,22 +27,51 @@ export default function DashboardPage() {
     }
     const accessToken = token;
 
-    async function run() {
-      try {
-        const response = await listTickets(accessToken, { page: 1, limit: 100 });
-        setTickets(response.data);
-      } catch (fetchError) {
-        if (fetchError instanceof ApiError) {
-          setError(fetchError.message);
-        } else {
-          setError('Could not load dashboard data.');
-        }
-      } finally {
-        setLoading(false);
+    try {
+      const response = await listTickets(accessToken, { page: 1, limit: 100 });
+      setTickets(response.data);
+      setRealtimeHint(null);
+    } catch (fetchError) {
+      if (fetchError instanceof ApiError) {
+        setError(fetchError.message);
+      } else {
+        setError('Could not load dashboard data.');
       }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadDashboardTickets();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const token = getAccessToken();
+    if (!token) {
+      return;
     }
 
-    void run();
+    const socket = connectRealtime(token);
+    if (!socket) {
+      return;
+    }
+
+    const unsubscribers = [
+      onRealtimeEvent<Record<string, unknown>>(socket, 'ticket.created', () => {
+        setRealtimeHint('Realtime update received. Refresh dashboard metrics.');
+      }),
+      onRealtimeEvent<Record<string, unknown>>(socket, 'ticket.updated', () => {
+        setRealtimeHint('Realtime update received. Refresh dashboard metrics.');
+      }),
+    ];
+
+    return () => {
+      for (const unsubscribe of unsubscribers) {
+        unsubscribe();
+      }
+    };
   }, []);
 
   const metrics = useMemo(() => {
@@ -75,6 +106,21 @@ export default function DashboardPage() {
       </div>
       {loading ? <p className="helper-text">Loading dashboard metrics...</p> : null}
       {error ? <p className="warning">{error}</p> : null}
+      {realtimeHint ? (
+        <div style={{ marginBottom: '0.8rem' }}>
+          <p className="helper-text">{realtimeHint}</p>
+          <button
+            type="button"
+            className="btn subtle-btn"
+            onClick={() => {
+              setLoading(true);
+              void loadDashboardTickets();
+            }}
+          >
+            Refresh metrics
+          </button>
+        </div>
+      ) : null}
       {!loading && !error ? (
         <div className="card-grid">
           <article className="card">

@@ -16,6 +16,8 @@ export interface AppEnv {
   BULLMQ_REDIS_URL: string;
   BULLMQ_DEFAULT_ATTEMPTS: number;
   BULLMQ_BACKOFF_MS: number;
+  REALTIME_ENABLED: boolean;
+  SOCKET_CORS_ORIGIN: string;
 }
 
 const requiredVars: Array<keyof Omit<AppEnv, 'PORT'>> = [
@@ -87,6 +89,15 @@ export function validateEnv(config: Record<string, unknown>): AppEnv {
       : getRequiredEnv('REDIS_URL', config.REDIS_URL);
   const bullmqDefaultAttempts = Number(config.BULLMQ_DEFAULT_ATTEMPTS ?? 3);
   const bullmqBackoffMs = Number(config.BULLMQ_BACKOFF_MS ?? 5000);
+  const realtimeEnabled =
+    typeof config.REALTIME_ENABLED === 'string'
+      ? config.REALTIME_ENABLED.trim().toLowerCase() !== 'false'
+      : true;
+  const socketCorsOrigin =
+    typeof config.SOCKET_CORS_ORIGIN === 'string' &&
+    config.SOCKET_CORS_ORIGIN.trim().length > 0
+      ? config.SOCKET_CORS_ORIGIN.trim()
+      : getRequiredEnv('CORS_ORIGIN', config.CORS_ORIGIN);
 
   if (!Number.isFinite(openaiTimeoutSeconds) || openaiTimeoutSeconds <= 0) {
     throw new Error(
@@ -154,5 +165,7 @@ export function validateEnv(config: Record<string, unknown>): AppEnv {
     BULLMQ_REDIS_URL: bullmqRedisUrl,
     BULLMQ_DEFAULT_ATTEMPTS: bullmqDefaultAttempts,
     BULLMQ_BACKOFF_MS: bullmqBackoffMs,
+    REALTIME_ENABLED: realtimeEnabled,
+    SOCKET_CORS_ORIGIN: socketCorsOrigin,
   };
 }

@@ -1,4 +1,4 @@
-# OpsPilot AI Architecture (Phase 5)
+# OpsPilot AI Architecture (Phase 6)
 
 ## Monorepo
 - `apps/api`: NestJS backend
@@ -16,6 +16,7 @@
 - `knowledge-base`: article CRUD, chunking, retrieval
 - `jobs`: queue orchestration, job records, job status endpoints
 - `workers`: BullMQ processors for ticket AI and KB rechunk
+- `realtime`: Socket.IO gateway, JWT socket auth, Redis pub/sub bridge
 - `audit`: centralized audit log service
 - `health`: health/readiness
 - `common`: guards, decorators, auth types
@@ -96,15 +97,18 @@ Provider behavior:
 
 ## Frontend Architecture
 - API access centralized in `apps/web/lib/api.ts`
+- realtime socket helpers centralized in `apps/web/lib/realtime.ts`
 - Ticket UI:
   - list/new/detail pages
   - AI analyze action and context display
   - async job polling (`QUEUED`/`PROCESSING`/`COMPLETED`/`FAILED`)
+  - realtime event handling with polling fallback
 - Knowledge Base UI:
   - `/knowledge-base`
   - `/knowledge-base/new`
   - `/knowledge-base/[id]`
   - async rechunk polling in article detail
+  - realtime rechunk progress updates
 
 ## Queue Architecture
 - Queue names:
@@ -124,6 +128,20 @@ Retry/backoff configuration:
 - `BULLMQ_BACKOFF_MS`
 - `BULLMQ_REDIS_URL`
 
+## Realtime Architecture
+- API process hosts Socket.IO gateway.
+- Socket auth validates JWT access token and binds user context.
+- Worker process does not host gateway.
+- Worker/API emit realtime events through shared `RealtimeService`.
+- `RealtimeService` publishes events to Redis channel and API gateway emits to rooms.
+
+Room model:
+- global support room: `support:all`
+- optional admin room: `admin:all`
+- user room: `user:{userId}`
+- ticket room: `ticket:{ticketId}`
+- job room: `job:{jobId}`
+
 ## Security and Reliability
 - `AI_PROVIDER=mock` by default; no key required
 - tests never require real OpenAI or network for AI validation paths
@@ -131,4 +149,4 @@ Retry/backoff configuration:
 - audit metadata stores safe operational context only
 
 ## Forward Path
-Next planned upgrade is real-time delivery with WebSockets/Socket.IO (Phase 6), then observability/security hardening.
+Next planned upgrade is observability/security hardening (Phase 7), then final portfolio release polish.

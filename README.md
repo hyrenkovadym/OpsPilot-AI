@@ -18,7 +18,7 @@ Internal support operations are often fragmented across chat, email, and spreads
 - Infra: Docker Compose, Redis readiness
 - Testing: API e2e (Jest + Supertest), browser E2E (Playwright)
 
-## Current Scope (Phase 5)
+## Current Scope (Phase 6)
 - Ticket lifecycle workflow (create, assign, status, priority, update)
 - Audit logging for auth, ticket lifecycle, AI, and knowledge base events
 - AI provider abstraction:
@@ -36,14 +36,21 @@ Internal support operations are often fragmented across chat, email, and spreads
   - async knowledge base rechunk queue + worker processing
   - persisted background job status tracking
   - sync fallback mode for deterministic tests/local fallback
+- Realtime updates with Socket.IO:
+  - authenticated websocket connections with JWT access token
+  - role-aware rooms (`support:all`, `user:{id}`, `ticket:{id}`, `job:{id}`)
+  - ticket lifecycle events (`ticket.created`, `ticket.updated`, ...)
+  - job lifecycle events (`job.queued`, `job.processing`, `job.completed`, `job.failed`)
+  - pub/sub bridge for worker-to-API realtime delivery via Redis
 - Frontend wiring:
   - auth, tickets, ticket detail AI actions
   - knowledge base list/new/detail pages
+  - realtime hints + live updates with polling fallback preserved
 
 Not included yet:
 - LangChain
 - full RAG/vector DB stack
-- WebSockets
+- WebSocket-based presence/collaboration features
 
 ## API URLs
 - API base: `http://localhost:4000/api`
@@ -90,6 +97,10 @@ Jobs:
 - `BULLMQ_REDIS_URL`
 - `BULLMQ_DEFAULT_ATTEMPTS`
 - `BULLMQ_BACKOFF_MS`
+
+Realtime:
+- `REALTIME_ENABLED` (`true` default)
+- `SOCKET_CORS_ORIGIN`
 
 ## Local Setup
 ```bash
@@ -165,11 +176,19 @@ In `QUEUE_MODE=async`:
 In `QUEUE_MODE=sync`:
 - analysis/rechunk are performed immediately in the API process
 
+## Realtime Flow
+- Socket server runs on the same API host/port (`http://localhost:4000`)
+- Client connects with `auth.token = <JWT access token>`
+- Worker publishes realtime events through Redis pub/sub
+- API subscribes and emits events to Socket.IO rooms
+- Frontend keeps polling as fallback for reliability
+
 ## Architecture Docs
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - [docs/RAG.md](docs/RAG.md)
 - [docs/JOBS.md](docs/JOBS.md)
+- [docs/REALTIME.md](docs/REALTIME.md)
 - [docs/ROADMAP.md](docs/ROADMAP.md)
 
 ## Portfolio Summary
-Phase 5 adds production-style async orchestration with BullMQ workers, retry/backoff handling, and auditable job state tracking while preserving deterministic mock AI behavior.
+Phase 6 adds authenticated Socket.IO realtime delivery on top of Phase 5 queues, including worker-safe Redis pub/sub bridging and frontend live updates with polling fallback.

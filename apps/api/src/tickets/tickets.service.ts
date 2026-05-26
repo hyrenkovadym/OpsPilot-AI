@@ -13,6 +13,8 @@ import { QueuedJobResponseDto } from '../jobs/dto/queued-job-response.dto';
 import { JobsService } from '../jobs/jobs.service';
 import { RetrievalService } from '../knowledge-base/retrieval.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { REALTIME_EVENTS, REALTIME_ROOMS } from '../realtime/realtime-events';
+import { RealtimeService } from '../realtime/realtime.service';
 import { AssignTicketDto } from './dto/assign-ticket.dto';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { ListTicketsQueryDto } from './dto/list-tickets-query.dto';
@@ -58,6 +60,7 @@ export class TicketsService {
     private readonly aiService: AiService,
     private readonly jobsService: JobsService,
     private readonly retrievalService: RetrievalService,
+    private readonly realtimeService: RealtimeService,
   ) {}
 
   async create(
@@ -86,6 +89,9 @@ export class TicketsService {
         category: ticket.category,
         priority: ticket.priority,
       },
+    });
+    await this.emitTicketEvent(REALTIME_EVENTS.ticketCreated, ticket, {
+      message: 'Ticket created',
     });
 
     return TicketDetailResponseDto.fromView(this.mapTicketToView(ticket));
@@ -162,6 +168,15 @@ export class TicketsService {
         note: dto.note ?? null,
       },
     });
+    await this.emitTicketEvent(REALTIME_EVENTS.ticketStatusUpdated, updated, {
+      message: 'Ticket status updated',
+      actorId: user.sub,
+      previousStatus,
+    });
+    await this.emitTicketEvent(REALTIME_EVENTS.ticketUpdated, updated, {
+      message: 'Ticket updated',
+      actorId: user.sub,
+    });
 
     return TicketDetailResponseDto.fromView(this.mapTicketToView(updated));
   }
@@ -208,6 +223,15 @@ export class TicketsService {
         after: { assignedToId: nextAssignedToId },
       },
     });
+    await this.emitTicketEvent(REALTIME_EVENTS.ticketAssigned, updated, {
+      message: 'Ticket assigned',
+      actorId: user.sub,
+      previousAssignedToId: existing.assignedToId,
+    });
+    await this.emitTicketEvent(REALTIME_EVENTS.ticketUpdated, updated, {
+      message: 'Ticket updated',
+      actorId: user.sub,
+    });
 
     return TicketDetailResponseDto.fromView(this.mapTicketToView(updated));
   }
@@ -239,6 +263,15 @@ export class TicketsService {
         before: { priority: existing.priority },
         after: { priority: dto.priority },
       },
+    });
+    await this.emitTicketEvent(REALTIME_EVENTS.ticketPriorityUpdated, updated, {
+      message: 'Ticket priority updated',
+      actorId: user.sub,
+      previousPriority: existing.priority,
+    });
+    await this.emitTicketEvent(REALTIME_EVENTS.ticketUpdated, updated, {
+      message: 'Ticket updated',
+      actorId: user.sub,
     });
 
     return TicketDetailResponseDto.fromView(this.mapTicketToView(updated));
@@ -290,6 +323,10 @@ export class TicketsService {
           category: updated.category,
         },
       },
+    });
+    await this.emitTicketEvent(REALTIME_EVENTS.ticketUpdated, updated, {
+      message: 'Ticket updated',
+      actorId: user.sub,
     });
 
     return TicketDetailResponseDto.fromView(this.mapTicketToView(updated));
@@ -408,6 +445,7 @@ export class TicketsService {
           aiContextSourcesJson: contextSources,
         },
       });
+      const updatedTicket = await this.getTicketWithUsers(existing.id);
 
       await this.auditService.log({
         actorId: input.actorId,
@@ -427,6 +465,24 @@ export class TicketsService {
           contextSourcesCount: contextSources.length,
         },
       });
+      await this.emitTicketEvent(REALTIME_EVENTS.ticketUpdated, updatedTicket, {
+        message: 'Ticket AI analysis applied',
+        actorId: input.actorId,
+      });
+      await this.realtimeService.publish(
+        REALTIME_EVENTS.ticketAiCompleted,
+        {
+          ticketId: updatedTicket.id,
+          status: updatedTicket.status,
+          category: updatedTicket.category,
+          priority: updatedTicket.priority,
+          aiConfidence: analysis.aiConfidence,
+          message: 'Ticket AI analysis completed',
+        },
+        {
+          rooms: this.buildTicketRooms(updatedTicket, input.actorId),
+        },
+      );
 
       return AiAnalysisResponseDto.fromAnalysis(
         analysis,
@@ -449,6 +505,18 @@ export class TicketsService {
           reason: this.safeErrorMessage(error),
         },
       });
+      await this.realtimeService.publish(
+        REALTIME_EVENTS.ticketAiFailed,
+        {
+          ticketId: existing.id,
+          status: existing.status,
+          reason: this.safeErrorMessage(error),
+          message: 'Ticket AI analysis failed',
+        },
+        {
+          rooms: this.buildTicketRooms(existing, input.actorId),
+        },
+      );
       throw new BadGatewayException(
         'AI analysis failed. Please try again later.',
       );
@@ -615,6 +683,55 @@ export class TicketsService {
           }
         : null,
     };
+  }
+
+  private async emitTicketEvent(
+    event: (typeof REALTIME_EVENTS)[keyof typeof REALTIME_EVENTS],
+    ticket: Pick<
+      TicketWithUsers,
+      'id' | 'status' | 'priority' | 'category' | 'assignedToId' | 'createdById'
+    >,
+    metadata: Record<string, unknown> = {},
+  ): Promise<void> {
+    await this.realtimeService.publish(
+      event,
+      {
+        ticketId: ticket.id,
+        status: ticket.status,
+        priority: ticket.priority,
+        category: ticket.category,
+        assignedToId: ticket.assignedToId,
+        createdById: ticket.createdById,
+        ...metadata,
+      },
+      {
+        rooms: this.buildTicketRooms(
+          ticket,
+          typeof metadata.actorId === 'string' ? metadata.actorId : undefined,
+        ),
+      },
+    );
+  }
+
+  private buildTicketRooms(
+    ticket: Pick<TicketWithUsers, 'id' | 'createdById' | 'assignedToId'>,
+    actorId?: string,
+  ): string[] {
+    const rooms = [
+      REALTIME_ROOMS.supportAll,
+      REALTIME_ROOMS.ticket(ticket.id),
+      REALTIME_ROOMS.user(ticket.createdById),
+    ];
+
+    if (ticket.assignedToId) {
+      rooms.push(REALTIME_ROOMS.user(ticket.assignedToId));
+    }
+
+    if (actorId) {
+      rooms.push(REALTIME_ROOMS.user(actorId));
+    }
+
+    return Array.from(new Set(rooms));
   }
 
   private assertCanViewTicket(

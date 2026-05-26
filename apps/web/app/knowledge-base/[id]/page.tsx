@@ -1,8 +1,8 @@
-'use client';
+﻿'use client';
 
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import { PageSection } from '@/components/page-section';
 import {
   ApiError,
@@ -18,6 +18,12 @@ import {
   type KnowledgeArticle,
   type TicketCategory,
 } from '@/lib/api';
+import {
+  connectRealtime,
+  onRealtimeEvent,
+  subscribeJobRoom,
+  unsubscribeJobRoom,
+} from '@/lib/realtime';
 
 interface FormState {
   title: string;
@@ -43,6 +49,11 @@ export default function KnowledgeArticleDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [jobMessage, setJobMessage] = useState<string | null>(null);
+
+  const socketRef = useRef<ReturnType<typeof connectRealtime>>(null);
+  const terminalJobStatesRef = useRef<Map<string, 'COMPLETED' | 'FAILED'>>(
+    new Map(),
+  );
 
   async function loadArticle() {
     const token = getAccessToken();
@@ -73,6 +84,79 @@ export default function KnowledgeArticleDetailPage() {
 
   useEffect(() => {
     void loadArticle();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.id]);
+
+  useEffect(() => {
+    const token = getAccessToken();
+    if (!token) {
+      return;
+    }
+
+    const socket = connectRealtime(token);
+    if (!socket) {
+      return;
+    }
+
+    socketRef.current = socket;
+
+    const unsubscribers = [
+      onRealtimeEvent<Record<string, unknown>>(
+        socket,
+        'knowledge.rechunk.processing',
+        (payload) => {
+          if (payload.articleId === params.id) {
+            setJobMessage('Rechunk job processing...');
+          }
+        },
+      ),
+      onRealtimeEvent<Record<string, unknown>>(
+        socket,
+        'knowledge.rechunk.completed',
+        (payload) => {
+          if (payload.articleId === params.id) {
+            if (typeof payload.jobId === 'string') {
+              terminalJobStatesRef.current.set(payload.jobId, 'COMPLETED');
+            }
+            setJobMessage('Rechunk job completed.');
+            void loadArticle();
+          }
+        },
+      ),
+      onRealtimeEvent<Record<string, unknown>>(
+        socket,
+        'knowledge.rechunk.failed',
+        (payload) => {
+          if (payload.articleId === params.id) {
+            if (typeof payload.jobId === 'string') {
+              terminalJobStatesRef.current.set(payload.jobId, 'FAILED');
+            }
+            const reason =
+              typeof payload.reason === 'string'
+                ? payload.reason
+                : 'Rechunk job failed.';
+            setError(reason);
+            setJobMessage('Rechunk job failed.');
+          }
+        },
+      ),
+      onRealtimeEvent<Record<string, unknown>>(socket, 'job.completed', (payload) => {
+        if (typeof payload.jobId === 'string') {
+          terminalJobStatesRef.current.set(payload.jobId, 'COMPLETED');
+        }
+      }),
+      onRealtimeEvent<Record<string, unknown>>(socket, 'job.failed', (payload) => {
+        if (typeof payload.jobId === 'string') {
+          terminalJobStatesRef.current.set(payload.jobId, 'FAILED');
+        }
+      }),
+    ];
+
+    return () => {
+      for (const unsubscribe of unsubscribers) {
+        unsubscribe();
+      }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.id]);
 
@@ -147,8 +231,14 @@ export default function KnowledgeArticleDetailPage() {
       const result = await rechunkKnowledgeArticle(token, params.id);
       if (isQueuedJobResponse(result)) {
         setJobMessage('Rechunk job queued. Waiting for worker...');
+        if (socketRef.current) {
+          subscribeJobRoom(socketRef.current, result.jobId);
+        }
         await pollJobUntilDone(token, result.jobId);
         await loadArticle();
+        if (socketRef.current) {
+          unsubscribeJobRoom(socketRef.current, result.jobId);
+        }
         setSuccess('Article chunks rebuilt asynchronously.');
       } else {
         setArticle(result);
@@ -169,16 +259,25 @@ export default function KnowledgeArticleDetailPage() {
   async function pollJobUntilDone(token: string, jobId: string): Promise<void> {
     const maxChecks = 30;
     for (let attempt = 0; attempt < maxChecks; attempt += 1) {
+      const realtimeStatus = terminalJobStatesRef.current.get(jobId);
+      if (realtimeStatus === 'COMPLETED') {
+        return;
+      }
+      if (realtimeStatus === 'FAILED') {
+        throw new ApiError('Rechunk job failed.', 500, { jobId, status: realtimeStatus });
+      }
+
       const job = await getJob(token, jobId);
       if (job.status === 'COMPLETED') {
+        terminalJobStatesRef.current.set(jobId, 'COMPLETED');
         return;
       }
       if (job.status === 'FAILED') {
-        throw new ApiError(
-          job.lastError ?? 'Background job failed.',
-          500,
-          { jobId, status: job.status },
-        );
+        terminalJobStatesRef.current.set(jobId, 'FAILED');
+        throw new ApiError(job.lastError ?? 'Background job failed.', 500, {
+          jobId,
+          status: job.status,
+        });
       }
       setJobMessage(`Rechunk job ${job.status.toLowerCase()}...`);
       await new Promise((resolve) => {

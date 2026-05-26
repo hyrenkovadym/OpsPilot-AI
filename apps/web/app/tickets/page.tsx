@@ -11,6 +11,7 @@ import {
   type TicketStatus,
   type TicketsListResponse,
 } from '@/lib/api';
+import { connectRealtime, onRealtimeEvent } from '@/lib/realtime';
 
 interface FilterState {
   search: string;
@@ -32,6 +33,7 @@ export default function TicketsPage() {
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [realtimeHint, setRealtimeHint] = useState<string | null>(null);
 
   async function loadTickets(nextPage: number, nextFilters: FilterState) {
     const token = getAccessToken();
@@ -56,6 +58,7 @@ export default function TicketsPage() {
       setTickets(response.data);
       setPage(response.meta.page);
       setTotalPages(response.meta.totalPages);
+      setRealtimeHint(null);
     } catch (fetchError) {
       if (fetchError instanceof ApiError) {
         setError(fetchError.message);
@@ -70,6 +73,33 @@ export default function TicketsPage() {
   useEffect(() => {
     void loadTickets(1, filters);
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const token = getAccessToken();
+    if (!token) {
+      return;
+    }
+
+    const socket = connectRealtime(token);
+    if (!socket) {
+      return;
+    }
+
+    const unsubscribers = [
+      onRealtimeEvent<Record<string, unknown>>(socket, 'ticket.created', () => {
+        setRealtimeHint('New ticket activity received. Refresh to see latest data.');
+      }),
+      onRealtimeEvent<Record<string, unknown>>(socket, 'ticket.updated', () => {
+        setRealtimeHint('Ticket updates available. Refresh to sync current view.');
+      }),
+    ];
+
+    return () => {
+      for (const unsubscribe of unsubscribers) {
+        unsubscribe();
+      }
+    };
   }, []);
 
   function onFilterSubmit(event: FormEvent<HTMLFormElement>) {
@@ -137,6 +167,19 @@ export default function TicketsPage() {
           Create new ticket
         </Link>
       </div>
+
+      {realtimeHint ? (
+        <div style={{ marginTop: '0.8rem' }}>
+          <p className="helper-text">{realtimeHint}</p>
+          <button
+            type="button"
+            className="btn subtle-btn"
+            onClick={() => void loadTickets(page, filters)}
+          >
+            Refresh tickets
+          </button>
+        </div>
+      ) : null}
 
       {loading ? <p className="helper-text">Loading tickets...</p> : null}
       {error ? <p className="warning">{error}</p> : null}

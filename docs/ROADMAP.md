@@ -36,12 +36,14 @@
 - Worker runtime + Docker worker service
 - Background job status endpoints and polling-ready frontend UX
 
-## Phase 6 (Next): Socket.IO Real-Time Updates
+## Phase 6 (Completed): Socket.IO Real-Time Updates
 - Real-time ticket status/assignment updates
 - Live queue refresh for support views
 - Authenticated event channels
+- Worker-safe event delivery through Redis pub/sub bridge
+- Frontend live updates with polling fallback
 
-## Phase 7: Observability and Security Hardening
+## Phase 7 (Next): Observability and Security Hardening
 - Structured logs and trace correlation
 - Metrics and alerting
 - Security polish (rate limiting, session/token hardening, policy docs)

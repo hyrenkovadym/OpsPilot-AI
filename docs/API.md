@@ -1,4 +1,4 @@
-# OpsPilot AI API (Phase 5)
+# OpsPilot AI API (Phase 6)
 
 Base URL: `http://localhost:4000/api`  
 Swagger: `http://localhost:4000/api/docs`
@@ -183,6 +183,52 @@ BullMQ environment:
 - `BULLMQ_REDIS_URL`
 - `BULLMQ_DEFAULT_ATTEMPTS`
 - `BULLMQ_BACKOFF_MS`
+
+## Realtime (Socket.IO)
+
+Socket endpoint:
+- `http://localhost:4000` (same API host/port)
+
+Authentication:
+- provide access token in Socket.IO auth payload:
+  - `auth: { token: "<jwt-access-token>" }`
+
+Room subscriptions via client emits:
+- `subscribe.ticket` with `{ ticketId }`
+- `unsubscribe.ticket` with `{ ticketId }`
+- `subscribe.job` with `{ jobId }`
+- `unsubscribe.job` with `{ jobId }`
+
+Server-managed rooms:
+- `support:all`
+- `admin:all`
+- `user:{userId}`
+- `ticket:{ticketId}`
+- `job:{jobId}`
+
+Realtime event names:
+- `ticket.created`
+- `ticket.updated`
+- `ticket.status.updated`
+- `ticket.assigned`
+- `ticket.priority.updated`
+- `job.queued`
+- `job.processing`
+- `job.completed`
+- `job.failed`
+- `ticket.ai.queued`
+- `ticket.ai.processing`
+- `ticket.ai.completed`
+- `ticket.ai.failed`
+- `knowledge.rechunk.queued`
+- `knowledge.rechunk.processing`
+- `knowledge.rechunk.completed`
+- `knowledge.rechunk.failed`
+- `audit.created`
+
+Payload safety:
+- includes safe fields like `ticketId`, `jobId`, `status`, `priority`, timestamps, and short messages
+- excludes secrets, token values, API keys, stack traces, and prompt/KB raw content
 
 ## Audit Events
 

@@ -1,23 +1,31 @@
-'use client';
+﻿'use client';
 
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { PageSection } from '@/components/page-section';
 import {
   analyzeTicket,
   ApiError,
   assignTicketTo,
-  getJob,
   getAccessToken,
-  getTicketAiSuggestion,
   getCurrentUser,
+  getJob,
   getTicket,
+  getTicketAiSuggestion,
   isQueuedJobResponse,
   type TicketDetail,
   type TicketStatus,
   updateTicketStatus,
 } from '@/lib/api';
+import {
+  connectRealtime,
+  onRealtimeEvent,
+  subscribeJobRoom,
+  subscribeTicketRoom,
+  unsubscribeJobRoom,
+  unsubscribeTicketRoom,
+} from '@/lib/realtime';
 
 export default function TicketDetailsPage() {
   const params = useParams<{ id: string }>();
@@ -28,6 +36,11 @@ export default function TicketDetailsPage() {
   const [actionLoading, setActionLoading] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiJobMessage, setAiJobMessage] = useState<string | null>(null);
+
+  const socketRef = useRef<ReturnType<typeof connectRealtime>>(null);
+  const terminalJobStatesRef = useRef<Map<string, 'COMPLETED' | 'FAILED'>>(
+    new Map(),
+  );
 
   async function loadTicket() {
     const token = getAccessToken();
@@ -56,6 +69,89 @@ export default function TicketDetailsPage() {
 
   useEffect(() => {
     void loadTicket();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.id]);
+
+  useEffect(() => {
+    const token = getAccessToken();
+    if (!token) {
+      return;
+    }
+
+    const socket = connectRealtime(token);
+    if (!socket) {
+      return;
+    }
+
+    socketRef.current = socket;
+    subscribeTicketRoom(socket, params.id);
+
+    const unsubscribers = [
+      onRealtimeEvent<Record<string, unknown>>(
+        socket,
+        'ticket.updated',
+        (payload) => {
+          if (payload.ticketId === params.id) {
+            void loadTicket();
+          }
+        },
+      ),
+      onRealtimeEvent<Record<string, unknown>>(socket, 'job.processing', (payload) => {
+        if (typeof payload.jobId === 'string') {
+          setAiJobMessage('AI analysis processing...');
+        }
+      }),
+      onRealtimeEvent<Record<string, unknown>>(socket, 'job.completed', (payload) => {
+        if (typeof payload.jobId === 'string') {
+          terminalJobStatesRef.current.set(payload.jobId, 'COMPLETED');
+          setAiJobMessage('AI analysis completed.');
+          void loadTicket();
+        }
+      }),
+      onRealtimeEvent<Record<string, unknown>>(socket, 'job.failed', (payload) => {
+        if (typeof payload.jobId === 'string') {
+          terminalJobStatesRef.current.set(payload.jobId, 'FAILED');
+          const reason =
+            typeof payload.reason === 'string'
+              ? payload.reason
+              : 'AI analysis job failed.';
+          setError(reason);
+          setAiJobMessage('AI analysis failed.');
+        }
+      }),
+      onRealtimeEvent<Record<string, unknown>>(
+        socket,
+        'ticket.ai.processing',
+        (payload) => {
+          if (payload.ticketId === params.id) {
+            setAiJobMessage('AI analysis processing...');
+          }
+        },
+      ),
+      onRealtimeEvent<Record<string, unknown>>(socket, 'ticket.ai.completed', (payload) => {
+        if (payload.ticketId === params.id) {
+          setAiJobMessage('AI analysis completed.');
+          void loadTicket();
+        }
+      }),
+      onRealtimeEvent<Record<string, unknown>>(socket, 'ticket.ai.failed', (payload) => {
+        if (payload.ticketId === params.id) {
+          const reason =
+            typeof payload.reason === 'string'
+              ? payload.reason
+              : 'AI analysis failed.';
+          setError(reason);
+          setAiJobMessage('AI analysis failed.');
+        }
+      }),
+    ];
+
+    return () => {
+      for (const unsubscribe of unsubscribers) {
+        unsubscribe();
+      }
+      unsubscribeTicketRoom(socket, params.id);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.id]);
 
@@ -123,8 +219,17 @@ export default function TicketDetailsPage() {
       const analysis = await analyzeTicket(token, params.id);
       if (isQueuedJobResponse(analysis)) {
         setAiJobMessage('AI analysis queued. Waiting for worker...');
+        if (socketRef.current) {
+          subscribeJobRoom(socketRef.current, analysis.jobId);
+        }
+
         await pollJobUntilDone(token, analysis.jobId);
         await loadTicket();
+
+        if (socketRef.current) {
+          unsubscribeJobRoom(socketRef.current, analysis.jobId);
+        }
+
         setAiJobMessage('AI analysis completed.');
         return;
       }
@@ -156,16 +261,28 @@ export default function TicketDetailsPage() {
   async function pollJobUntilDone(token: string, jobId: string): Promise<void> {
     const maxChecks = 30;
     for (let attempt = 0; attempt < maxChecks; attempt += 1) {
+      const realtimeStatus = terminalJobStatesRef.current.get(jobId);
+      if (realtimeStatus === 'COMPLETED') {
+        return;
+      }
+      if (realtimeStatus === 'FAILED') {
+        throw new ApiError('AI analysis job failed.', 500, {
+          jobId,
+          status: realtimeStatus,
+        });
+      }
+
       const job = await getJob(token, jobId);
       if (job.status === 'COMPLETED') {
+        terminalJobStatesRef.current.set(jobId, 'COMPLETED');
         return;
       }
       if (job.status === 'FAILED') {
-        throw new ApiError(
-          job.lastError ?? 'AI analysis job failed.',
-          500,
-          { jobId, status: job.status },
-        );
+        terminalJobStatesRef.current.set(jobId, 'FAILED');
+        throw new ApiError(job.lastError ?? 'AI analysis job failed.', 500, {
+          jobId,
+          status: job.status,
+        });
       }
       setAiJobMessage(`AI analysis ${job.status.toLowerCase()}...`);
       await new Promise((resolve) => {

@@ -23,6 +23,7 @@ import { AppModule } from '../src/app.module';
 import { JobsService } from '../src/jobs/jobs.service';
 import { KnowledgeBaseService } from '../src/knowledge-base/knowledge-base.service';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { RealtimeService } from '../src/realtime/realtime.service';
 import { TicketsService } from '../src/tickets/tickets.service';
 
 interface AuthPayload {
@@ -725,7 +726,10 @@ class MockPrismaService {
       take?: number;
     }): Promise<BackgroundJob[]> => {
       const filtered = this.backgroundJobs.filter((item) => {
-        if (args.where?.entityType && item.entityType !== args.where.entityType) {
+        if (
+          args.where?.entityType &&
+          item.entityType !== args.where.entityType
+        ) {
           return false;
         }
         if (args.where?.entityId && item.entityId !== args.where.entityId) {
@@ -764,6 +768,7 @@ describe('OpsPilot API Phase 3 (e2e)', () => {
   let jobsService: JobsService;
   let ticketsService: TicketsService;
   let knowledgeBaseService: KnowledgeBaseService;
+  let realtimeService: RealtimeService;
 
   beforeAll(async () => {
     mockPrisma = new MockPrismaService();
@@ -789,6 +794,7 @@ describe('OpsPilot API Phase 3 (e2e)', () => {
     jobsService = app.get(JobsService);
     ticketsService = app.get(TicketsService);
     knowledgeBaseService = app.get(KnowledgeBaseService);
+    realtimeService = app.get(RealtimeService);
   });
 
   afterAll(async () => {
@@ -796,6 +802,10 @@ describe('OpsPilot API Phase 3 (e2e)', () => {
   });
 
   it('user creates ticket', async () => {
+    const publishSpy = jest
+      .spyOn(realtimeService, 'publish')
+      .mockResolvedValue(undefined);
+
     const user = await register('ticket.creator@company.com', 'Ticket Creator');
     const response = await createTicket(user.accessToken, {
       title: 'Need laptop replacement',
@@ -807,6 +817,10 @@ describe('OpsPilot API Phase 3 (e2e)', () => {
     expect(response.status).toBe(201);
     expect(response.body.title).toBe('Need laptop replacement');
     expect(response.body.createdById).toBe(user.user.id);
+    expect(
+      publishSpy.mock.calls.some((call) => call[0] === 'ticket.created'),
+    ).toBe(true);
+    publishSpy.mockRestore();
   });
 
   it('user sees only own tickets', async () => {
@@ -922,6 +936,10 @@ describe('OpsPilot API Phase 3 (e2e)', () => {
   });
 
   it('support agent updates status', async () => {
+    const publishSpy = jest
+      .spyOn(realtimeService, 'publish')
+      .mockResolvedValue(undefined);
+
     const user = await register('status.owner@company.com', 'Status Owner');
     const support = await register('status.agent@company.com', 'Status Agent');
     setRole(support.user.email, Role.SUPPORT_AGENT);
@@ -941,6 +959,10 @@ describe('OpsPilot API Phase 3 (e2e)', () => {
       .expect(200);
 
     expect(response.body.status).toBe('IN_PROGRESS');
+    expect(
+      publishSpy.mock.calls.some((call) => call[0] === 'ticket.status.updated'),
+    ).toBe(true);
+    publishSpy.mockRestore();
   });
 
   it('user cannot update status to non-resolved state', async () => {
@@ -1512,7 +1534,9 @@ describe('OpsPilot API Phase 3 (e2e)', () => {
   });
 
   it('QUEUE_MODE=sync preserves direct AI analysis response', async () => {
-    const modeSpy = jest.spyOn(jobsService, 'isAsyncMode').mockReturnValue(false);
+    const modeSpy = jest
+      .spyOn(jobsService, 'isAsyncMode')
+      .mockReturnValue(false);
     const user = await register('sync.ai.user@company.com', 'Sync AI User');
     const created = await createTicket(user.accessToken, {
       title: 'sync mode analysis',
@@ -1532,7 +1556,13 @@ describe('OpsPilot API Phase 3 (e2e)', () => {
   });
 
   it('QUEUE_MODE=async returns queued response and creates BackgroundJob', async () => {
-    const modeSpy = jest.spyOn(jobsService, 'isAsyncMode').mockReturnValue(true);
+    const modeSpy = jest
+      .spyOn(jobsService, 'isAsyncMode')
+      .mockReturnValue(true);
+    const publishSpy = jest
+      .spyOn(realtimeService, 'publish')
+      .mockResolvedValue(undefined);
+
     const user = await register('async.ai.user@company.com', 'Async AI User');
     const created = await createTicket(user.accessToken, {
       title: 'async mode analysis',
@@ -1540,6 +1570,7 @@ describe('OpsPilot API Phase 3 (e2e)', () => {
       category: 'IT',
       priority: 'MEDIUM',
     });
+    const callsBeforeAnalyze = publishSpy.mock.calls.length;
 
     const response = await request(app.getHttpServer())
       .post(`/api/tickets/${created.body.id as string}/ai/analyze`)
@@ -1553,11 +1584,15 @@ describe('OpsPilot API Phase 3 (e2e)', () => {
       (item) => item.id === (response.body.jobId as string),
     );
     expect(queuedJob?.type).toBe(BackgroundJobType.TICKET_AI_ANALYSIS);
+    expect(publishSpy.mock.calls.length).toBeGreaterThan(callsBeforeAnalyze);
+    publishSpy.mockRestore();
     modeSpy.mockRestore();
   });
 
   it('user cannot enqueue AI analysis for another user ticket in async mode', async () => {
-    const modeSpy = jest.spyOn(jobsService, 'isAsyncMode').mockReturnValue(true);
+    const modeSpy = jest
+      .spyOn(jobsService, 'isAsyncMode')
+      .mockReturnValue(true);
     const owner = await register('async.owner@company.com', 'Async Owner');
     const outsider = await register(
       'async.outsider@company.com',
@@ -1579,7 +1614,9 @@ describe('OpsPilot API Phase 3 (e2e)', () => {
   });
 
   it('support agent can enqueue AI analysis for any ticket in async mode', async () => {
-    const modeSpy = jest.spyOn(jobsService, 'isAsyncMode').mockReturnValue(true);
+    const modeSpy = jest
+      .spyOn(jobsService, 'isAsyncMode')
+      .mockReturnValue(true);
     const owner = await register('async.owner2@company.com', 'Async Owner 2');
     const support = await register(
       'async.support@company.com',
@@ -1605,8 +1642,13 @@ describe('OpsPilot API Phase 3 (e2e)', () => {
   });
 
   it('job status endpoint returns job for authorized user', async () => {
-    const modeSpy = jest.spyOn(jobsService, 'isAsyncMode').mockReturnValue(true);
-    const user = await register('job.status.user@company.com', 'Job Status User');
+    const modeSpy = jest
+      .spyOn(jobsService, 'isAsyncMode')
+      .mockReturnValue(true);
+    const user = await register(
+      'job.status.user@company.com',
+      'Job Status User',
+    );
     const created = await createTicket(user.accessToken, {
       title: 'job status ticket',
       description: 'Job status visibility for owner.',
@@ -1631,7 +1673,9 @@ describe('OpsPilot API Phase 3 (e2e)', () => {
   });
 
   it('unauthorized user cannot read another user job', async () => {
-    const modeSpy = jest.spyOn(jobsService, 'isAsyncMode').mockReturnValue(true);
+    const modeSpy = jest
+      .spyOn(jobsService, 'isAsyncMode')
+      .mockReturnValue(true);
     const owner = await register('job.owner@company.com', 'Job Owner');
     const outsider = await register('job.outsider@company.com', 'Job Outsider');
 
@@ -1656,7 +1700,13 @@ describe('OpsPilot API Phase 3 (e2e)', () => {
   });
 
   it('worker-like processing updates queued AI job and ticket', async () => {
-    const modeSpy = jest.spyOn(jobsService, 'isAsyncMode').mockReturnValue(true);
+    const modeSpy = jest
+      .spyOn(jobsService, 'isAsyncMode')
+      .mockReturnValue(true);
+    const publishSpy = jest
+      .spyOn(realtimeService, 'publish')
+      .mockResolvedValue(undefined);
+
     const user = await register('worker.ai.user@company.com', 'Worker AI User');
     const created = await createTicket(user.accessToken, {
       title: 'worker processing ticket',
@@ -1671,6 +1721,7 @@ describe('OpsPilot API Phase 3 (e2e)', () => {
       .expect(201);
 
     const jobId = queued.body.jobId as string;
+    const callsBeforeWorkerFlow = publishSpy.mock.calls.length;
     await jobsService.markProcessing({ jobId, attempts: 1 });
     await ticketsService.analyzeTicketForJob({
       ticketId: created.body.id as string,
@@ -1691,14 +1742,27 @@ describe('OpsPilot API Phase 3 (e2e)', () => {
     expect(updatedTicket?.aiSummary).toBeTruthy();
     expect(updatedTicket?.aiConfidence).not.toBeNull();
 
-    const updatedJob = mockPrisma.backgroundJobs.find((item) => item.id === jobId);
+    const updatedJob = mockPrisma.backgroundJobs.find(
+      (item) => item.id === jobId,
+    );
     expect(updatedJob?.status).toBe(BackgroundJobStatus.COMPLETED);
+    expect(publishSpy.mock.calls.length).toBeGreaterThan(callsBeforeWorkerFlow);
+    publishSpy.mockRestore();
     modeSpy.mockRestore();
   });
 
   it('failed AI worker path marks background job as FAILED', async () => {
-    const modeSpy = jest.spyOn(jobsService, 'isAsyncMode').mockReturnValue(true);
-    const user = await register('worker.fail.user@company.com', 'Worker Fail User');
+    const modeSpy = jest
+      .spyOn(jobsService, 'isAsyncMode')
+      .mockReturnValue(true);
+    const publishSpy = jest
+      .spyOn(realtimeService, 'publish')
+      .mockResolvedValue(undefined);
+
+    const user = await register(
+      'worker.fail.user@company.com',
+      'Worker Fail User',
+    );
     const created = await createTicket(user.accessToken, {
       title: 'worker failure ticket',
       description: 'Worker should mark this job as failed.',
@@ -1715,6 +1779,7 @@ describe('OpsPilot API Phase 3 (e2e)', () => {
     const analyzeSpy = jest
       .spyOn(aiService, 'analyzeTicket')
       .mockRejectedValueOnce(new Error('worker provider down'));
+    const callsBeforeFailureFlow = publishSpy.mock.calls.length;
 
     await jobsService.markProcessing({ jobId, attempts: 1 });
     await expect(
@@ -1733,14 +1798,25 @@ describe('OpsPilot API Phase 3 (e2e)', () => {
     });
     analyzeSpy.mockRestore();
 
-    const failedJob = mockPrisma.backgroundJobs.find((item) => item.id === jobId);
+    const failedJob = mockPrisma.backgroundJobs.find(
+      (item) => item.id === jobId,
+    );
     expect(failedJob?.status).toBe(BackgroundJobStatus.FAILED);
+    expect(publishSpy.mock.calls.length).toBeGreaterThan(
+      callsBeforeFailureFlow,
+    );
+    publishSpy.mockRestore();
     modeSpy.mockRestore();
   });
 
   it('support agent can enqueue article rechunk in async mode', async () => {
-    const modeSpy = jest.spyOn(jobsService, 'isAsyncMode').mockReturnValue(true);
-    const support = await register('rechunk.agent@company.com', 'Rechunk Agent');
+    const modeSpy = jest
+      .spyOn(jobsService, 'isAsyncMode')
+      .mockReturnValue(true);
+    const support = await register(
+      'rechunk.agent@company.com',
+      'Rechunk Agent',
+    );
     setRole(support.user.email, Role.SUPPORT_AGENT);
     const supportLogin = await login('rechunk.agent@company.com');
 
@@ -1764,8 +1840,13 @@ describe('OpsPilot API Phase 3 (e2e)', () => {
   });
 
   it('user cannot enqueue article rechunk in async mode', async () => {
-    const modeSpy = jest.spyOn(jobsService, 'isAsyncMode').mockReturnValue(true);
-    const support = await register('rechunk.owner@company.com', 'Rechunk Owner');
+    const modeSpy = jest
+      .spyOn(jobsService, 'isAsyncMode')
+      .mockReturnValue(true);
+    const support = await register(
+      'rechunk.owner@company.com',
+      'Rechunk Owner',
+    );
     setRole(support.user.email, Role.SUPPORT_AGENT);
     const supportLogin = await login('rechunk.owner@company.com');
     const user = await register('rechunk.user@company.com', 'Rechunk User');
@@ -1789,7 +1870,9 @@ describe('OpsPilot API Phase 3 (e2e)', () => {
   });
 
   it('worker-like rechunk flow completes and preserves chunks', async () => {
-    const modeSpy = jest.spyOn(jobsService, 'isAsyncMode').mockReturnValue(true);
+    const modeSpy = jest
+      .spyOn(jobsService, 'isAsyncMode')
+      .mockReturnValue(true);
     const support = await register(
       'worker.rechunk.agent@company.com',
       'Worker Rechunk Agent',
@@ -1843,7 +1926,9 @@ describe('OpsPilot API Phase 3 (e2e)', () => {
   });
 
   it('failed rechunk worker path marks job as FAILED', async () => {
-    const modeSpy = jest.spyOn(jobsService, 'isAsyncMode').mockReturnValue(true);
+    const modeSpy = jest
+      .spyOn(jobsService, 'isAsyncMode')
+      .mockReturnValue(true);
     const support = await register(
       'worker.rechunk.fail@company.com',
       'Worker Rechunk Fail',
@@ -1872,7 +1957,8 @@ describe('OpsPilot API Phase 3 (e2e)', () => {
     });
 
     expect(
-      mockPrisma.backgroundJobs.find((item) => item.id === queued.jobId)?.status,
+      mockPrisma.backgroundJobs.find((item) => item.id === queued.jobId)
+        ?.status,
     ).toBe(BackgroundJobStatus.FAILED);
     modeSpy.mockRestore();
   });

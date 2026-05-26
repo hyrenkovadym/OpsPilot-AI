@@ -4,6 +4,7 @@ import configuration from '../config/configuration';
 import { validateEnv } from '../config/env.validation';
 import { JobsModule } from '../jobs/jobs.module';
 import { PrismaModule } from '../prisma/prisma.module';
+import { RealtimeModule } from '../realtime/realtime.module';
 import { WorkersModule } from './workers.module';
 
 @Module({
@@ -15,6 +16,7 @@ import { WorkersModule } from './workers.module';
       validate: validateEnv,
     }),
     PrismaModule,
+    RealtimeModule,
     JobsModule.register(),
     WorkersModule,
   ],

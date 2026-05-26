@@ -16,3 +16,5 @@ process.env.QUEUE_MODE = 'sync';
 process.env.BULLMQ_REDIS_URL = 'redis://localhost:6379';
 process.env.BULLMQ_DEFAULT_ATTEMPTS = '3';
 process.env.BULLMQ_BACKOFF_MS = '5000';
+process.env.REALTIME_ENABLED = 'false';
+process.env.SOCKET_CORS_ORIGIN = 'http://localhost:3000';

@@ -1,4 +1,4 @@
-# OpsPilot AI Jobs (Phase 5)
+# OpsPilot AI Jobs (Phase 6)
 
 ## Overview
 Phase 5 introduces BullMQ-based background processing for two async workflows:
@@ -81,6 +81,19 @@ Queue-related audit events include:
 - `knowledge_article_rechunk_failed`
 
 Logs and audit metadata exclude API keys, secrets, full prompts, and full KB content.
+
+## Realtime Integration
+
+- Jobs publish lifecycle events:
+  - `job.queued`
+  - `job.processing`
+  - `job.completed`
+  - `job.failed`
+- Domain-specific events:
+  - `ticket.ai.queued|processing|completed|failed`
+  - `knowledge.rechunk.queued|processing|completed|failed`
+- Worker emits events through Redis pub/sub bridge and API gateway forwards to sockets.
+- Polling endpoints (`GET /jobs/:id`, `GET /jobs/tickets/:ticketId`) remain available as fallback.
 
 ## Docker
 
